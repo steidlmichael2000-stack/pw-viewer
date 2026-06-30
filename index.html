@@ -60,6 +60,47 @@
 
 			scene.addPointCloud(pointcloud);
 			viewer.fitToScreen();
+
+			// Zoom-Verstärker: zusätzlich zu Potrees Standard-Zoom Faktor 19
+			// drauflegen (Potree macht 1x, wir 19x ⇒ gesamt 20x).
+			const ZOOM_BOOST = 19;
+			const renderArea = document.getElementById("potree_render_area");
+
+			renderArea.addEventListener('wheel', (ev) => {
+				const view = viewer.scene.view;
+				const dir = ev.deltaY > 0 ? 1 : -1;
+				viewer.orbitControls.radiusDelta += dir * view.radius * 0.1 * ZOOM_BOOST;
+			}, {passive: true});
+
+			let prevPinchDist = null;
+			renderArea.addEventListener('touchstart', (ev) => {
+				if (ev.touches.length === 2) {
+					const dx = ev.touches[0].pageX - ev.touches[1].pageX;
+					const dy = ev.touches[0].pageY - ev.touches[1].pageY;
+					prevPinchDist = Math.sqrt(dx * dx + dy * dy);
+				} else {
+					prevPinchDist = null;
+				}
+			}, {passive: true});
+			renderArea.addEventListener('touchmove', (ev) => {
+				if (ev.touches.length !== 2 || prevPinchDist === null) {
+					return;
+				}
+				const dx = ev.touches[0].pageX - ev.touches[1].pageX;
+				const dy = ev.touches[0].pageY - ev.touches[1].pageY;
+				const dist = Math.sqrt(dx * dx + dy * dy);
+				const ratio = dist / prevPinchDist;
+				const amplified = Math.pow(ratio, ZOOM_BOOST);
+				const oc = viewer.orbitControls;
+				const view = viewer.scene.view;
+				const resolved = view.radius + oc.radiusDelta;
+				const newRadius = resolved / amplified;
+				oc.radiusDelta += newRadius - resolved;
+				prevPinchDist = dist;
+			}, {passive: true});
+			renderArea.addEventListener('touchend', () => {
+				prevPinchDist = null;
+			}, {passive: true});
 		});
 	</script>
 </body>
