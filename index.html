@@ -60,6 +60,48 @@
 
 			scene.addPointCloud(pointcloud);
 			viewer.fitToScreen();
+
+			// Touch: Zwei-Finger-Verschieben (Pan) zusätzlich zum Pinch-Zoom.
+			// Potree-Default hat 2 Finger = nur Zoom, Pan erst bei 3 Fingern — auf
+			// dem Handy unbrauchbar.
+			const renderArea = document.getElementById("potree_render_area");
+			let prevTouches = null;
+			renderArea.addEventListener('touchstart', (ev) => {
+				if (ev.touches.length === 2) {
+					prevTouches = [
+						{x: ev.touches[0].pageX, y: ev.touches[0].pageY},
+						{x: ev.touches[1].pageX, y: ev.touches[1].pageY}
+					];
+				} else {
+					prevTouches = null;
+				}
+			}, {passive: true});
+			renderArea.addEventListener('touchmove', (ev) => {
+				if (ev.touches.length === 2 && prevTouches) {
+					const currMean = {
+						x: (ev.touches[0].pageX + ev.touches[1].pageX) / 2,
+						y: (ev.touches[0].pageY + ev.touches[1].pageY) / 2
+					};
+					const prevMean = {
+						x: (prevTouches[0].x + prevTouches[1].x) / 2,
+						y: (prevTouches[0].y + prevTouches[1].y) / 2
+					};
+					const w = renderArea.clientWidth;
+					const h = renderArea.clientHeight;
+					viewer.orbitControls.panDelta.x += (currMean.x - prevMean.x) / w;
+					viewer.orbitControls.panDelta.y += (currMean.y - prevMean.y) / h;
+					prevTouches = [
+						{x: ev.touches[0].pageX, y: ev.touches[0].pageY},
+						{x: ev.touches[1].pageX, y: ev.touches[1].pageY}
+					];
+				}
+			}, {passive: true});
+			renderArea.addEventListener('touchend', () => {
+				prevTouches = null;
+			}, {passive: true});
+
+			// Pan- und Zoom-Geschwindigkeit erhöhen (Handy-tauglich)
+			viewer.orbitControls.panSpeed = 4;
 		});
 	</script>
 </body>
