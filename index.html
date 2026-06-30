@@ -60,6 +60,9 @@
 
 			scene.addPointCloud(pointcloud);
 			viewer.fitToScreen();
+
+			viewer.setControls(viewer.orbitControls);
+			viewer.setMoveSpeed(20);
 		});
 	</script>
 </body>
