@@ -59,39 +59,7 @@
 			material.shape = Potree.PointShape.SQUARE;
 
 			scene.addPointCloud(pointcloud);
-
-			// Welt-BBox aus lokaler BBox + Pointcloud-Transformation berechnen
-			const localBox = pointcloud.boundingBox;
-			pointcloud.updateMatrixWorld(true);
-			const mw = pointcloud.matrixWorld.elements;
-			const worldMin = {
-				x: localBox.min.x + mw[12],
-				y: localBox.min.y + mw[13],
-				z: localBox.min.z + mw[14]
-			};
-			const worldMax = {
-				x: localBox.max.x + mw[12],
-				y: localBox.max.y + mw[13],
-				z: localBox.max.z + mw[14]
-			};
-			const center = {
-				x: (worldMin.x + worldMax.x) / 2,
-				y: (worldMin.y + worldMax.y) / 2,
-				z: (worldMin.z + worldMax.z) / 2
-			};
-			const radius = Math.max(
-				worldMax.x - worldMin.x,
-				worldMax.y - worldMin.y,
-				worldMax.z - worldMin.z
-			);
-
-			scene.view.setView(
-				[center.x, center.y - radius * 0.8, center.z + radius * 0.9],
-				[center.x, center.y, center.z]
-			);
-
-			viewer.setControls(viewer.earthControls);
-			viewer.setMoveSpeed(radius * 0.1);
+			viewer.fitToScreen();
 		});
 	</script>
 </body>
