@@ -59,49 +59,39 @@
 			material.shape = Potree.PointShape.SQUARE;
 
 			scene.addPointCloud(pointcloud);
-			viewer.fitToScreen();
 
-			// Touch: Zwei-Finger-Verschieben (Pan) zusätzlich zum Pinch-Zoom.
-			// Potree-Default hat 2 Finger = nur Zoom, Pan erst bei 3 Fingern — auf
-			// dem Handy unbrauchbar.
-			const renderArea = document.getElementById("potree_render_area");
-			let prevTouches = null;
-			renderArea.addEventListener('touchstart', (ev) => {
-				if (ev.touches.length === 2) {
-					prevTouches = [
-						{x: ev.touches[0].pageX, y: ev.touches[0].pageY},
-						{x: ev.touches[1].pageX, y: ev.touches[1].pageY}
-					];
-				} else {
-					prevTouches = null;
-				}
-			}, {passive: true});
-			renderArea.addEventListener('touchmove', (ev) => {
-				if (ev.touches.length === 2 && prevTouches) {
-					const currMean = {
-						x: (ev.touches[0].pageX + ev.touches[1].pageX) / 2,
-						y: (ev.touches[0].pageY + ev.touches[1].pageY) / 2
-					};
-					const prevMean = {
-						x: (prevTouches[0].x + prevTouches[1].x) / 2,
-						y: (prevTouches[0].y + prevTouches[1].y) / 2
-					};
-					const w = renderArea.clientWidth;
-					const h = renderArea.clientHeight;
-					viewer.orbitControls.panDelta.x += (currMean.x - prevMean.x) / w;
-					viewer.orbitControls.panDelta.y += (currMean.y - prevMean.y) / h;
-					prevTouches = [
-						{x: ev.touches[0].pageX, y: ev.touches[0].pageY},
-						{x: ev.touches[1].pageX, y: ev.touches[1].pageY}
-					];
-				}
-			}, {passive: true});
-			renderArea.addEventListener('touchend', () => {
-				prevTouches = null;
-			}, {passive: true});
+			// Welt-BBox aus lokaler BBox + Pointcloud-Transformation berechnen
+			const localBox = pointcloud.boundingBox;
+			pointcloud.updateMatrixWorld(true);
+			const mw = pointcloud.matrixWorld.elements;
+			const worldMin = {
+				x: localBox.min.x + mw[12],
+				y: localBox.min.y + mw[13],
+				z: localBox.min.z + mw[14]
+			};
+			const worldMax = {
+				x: localBox.max.x + mw[12],
+				y: localBox.max.y + mw[13],
+				z: localBox.max.z + mw[14]
+			};
+			const center = {
+				x: (worldMin.x + worldMax.x) / 2,
+				y: (worldMin.y + worldMax.y) / 2,
+				z: (worldMin.z + worldMax.z) / 2
+			};
+			const radius = Math.max(
+				worldMax.x - worldMin.x,
+				worldMax.y - worldMin.y,
+				worldMax.z - worldMin.z
+			);
 
-			// Pan- und Zoom-Geschwindigkeit erhöhen (Handy-tauglich)
-			viewer.orbitControls.panSpeed = 4;
+			scene.view.setView(
+				[center.x, center.y - radius * 0.8, center.z + radius * 0.9],
+				[center.x, center.y, center.z]
+			);
+
+			viewer.setControls(viewer.earthControls);
+			viewer.setMoveSpeed(radius * 0.1);
 		});
 	</script>
 </body>
