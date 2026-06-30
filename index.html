@@ -45,7 +45,14 @@
 			viewer.setLanguage('de');
 			$("#menu_tools").next().show();
 			$("#menu_clipping").next().show();
-			viewer.toggleSidebar();
+			$("#potree_sidebar_container").hide();
+
+			// Hamburger-Icon: zusätzlich die Sidebar wirklich ein-/ausblenden
+			// (Potrees toggleSidebar schiebt nur die Render-Fläche, blendet
+			// die Sidebar selbst aber nicht aus).
+			$(".potree_menu_toggle").on("click", () => {
+				$("#potree_sidebar_container").toggle();
+			});
 		});
 
 		const POINTCLOUD_URL = "https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev/geckenheim/metadata.json";
