@@ -1,0 +1,11 @@
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+
+# Sicherheitshalber — falls jemand Credentials hier reinkopiert
+*.env
+*credentials*
+*.key
+rclone.conf
