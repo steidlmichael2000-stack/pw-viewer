@@ -59,12 +59,27 @@
 			material.shape = Potree.PointShape.SQUARE;
 
 			scene.addPointCloud(pointcloud);
-			viewer.fitToScreen();
 
-			viewer.setControls(viewer.orbitControls);
-			viewer.setMoveSpeed(20);
-			viewer.orbitControls.panSpeed = 3;
-			viewer.orbitControls.zoomSpeed = 2;
+			const bbox = pointcloud.boundingBoxWorld || pointcloud.boundingBox;
+			const min = bbox.min;
+			const max = bbox.max;
+			const center = {
+				x: (min.x + max.x) / 2,
+				y: (min.y + max.y) / 2,
+				z: (min.z + max.z) / 2
+			};
+			const sizeX = max.x - min.x;
+			const sizeY = max.y - min.y;
+			const sizeZ = max.z - min.z;
+			const radius = Math.max(sizeX, sizeY, sizeZ);
+
+			scene.view.setView(
+				[center.x + radius * 0.4, center.y - radius * 0.6, center.z + radius * 0.8],
+				[center.x, center.y, center.z]
+			);
+
+			viewer.setControls(viewer.earthControls);
+			viewer.setMoveSpeed(radius * 0.1);
 		});
 	</script>
 </body>
