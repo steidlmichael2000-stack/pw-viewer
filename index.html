@@ -39,8 +39,6 @@
 		viewer.setPointBudget(1_000_000);
 		viewer.loadSettingsFromURL();
 		viewer.setBackground("skybox");
-		viewer.setDescription("Geckenheim — Drohnenaufnahme (WebODM)");
-
 		viewer.loadGUI(() => {
 			viewer.setLanguage('de');
 			$("#menu_tools").next().show();
@@ -55,9 +53,21 @@
 			});
 		});
 
-		const POINTCLOUD_URL = "https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev/geckenheim/metadata.json";
+		const R2_BASE = "https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev";
+		const DEFAULT_PC = "geckenheim";
 
-		Potree.loadPointCloud(POINTCLOUD_URL, "Geckenheim", e => {
+		// Punktwolken-Name aus URL-Parameter ?p=<name> auslesen.
+		// Nur Kleinbuchstaben/Ziffern/_/- erlaubt, sonst Default.
+		const params = new URLSearchParams(window.location.search);
+		const rawName = params.get("p") || DEFAULT_PC;
+		const pcName = /^[a-z0-9_-]+$/.test(rawName) ? rawName : DEFAULT_PC;
+
+		const POINTCLOUD_URL = `${R2_BASE}/${pcName}/metadata.json`;
+		const displayName = pcName.charAt(0).toUpperCase() + pcName.slice(1);
+
+		viewer.setDescription(`${displayName} — Drohnenaufnahme (WebODM)`);
+
+		Potree.loadPointCloud(POINTCLOUD_URL, displayName, e => {
 			let scene = viewer.scene;
 			let pointcloud = e.pointcloud;
 			let material = pointcloud.material;
