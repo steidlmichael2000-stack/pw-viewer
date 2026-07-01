@@ -67,11 +67,15 @@
 
 		viewer.setDescription(`${displayName} — Drohnenaufnahme (WebODM)`);
 
+		// Mehr Punkte gleichzeitig sichtbar (Standard 1 Mio.).
+		// Hilft gegen "dünne Punktwolke bei Naheinstellung".
+		viewer.setPointBudget(3_000_000);
+
 		Potree.loadPointCloud(POINTCLOUD_URL, displayName, e => {
 			let scene = viewer.scene;
 			let pointcloud = e.pointcloud;
 			let material = pointcloud.material;
-			material.size = 1;
+			material.size = 2;
 			material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
 			material.shape = Potree.PointShape.SQUARE;
 
@@ -98,11 +102,12 @@
 			const renderArea = document.getElementById("potree_render_area");
 
 			const SENS = {
-				pan: 1.0,       // pan-Empfindlichkeit
-				zoomPinch: 40,  // Pinch: ratio^N
-				zoomWheel: 40,  // Mausrad: Faktor N
-				yaw: 1.5,       // 2-Finger-Drehen
-				pitch: 2.0      // 2-Finger-vertikal
+				pan: 1.2,       // pan-Empfindlichkeit (world = pan * effRadius * fraction)
+				panFloor: 5,    // effRadius = max(view.radius, panFloor) - Pan bleibt bei Nah-Zoom nutzbar
+				zoomPinch: 10,  // Pinch: ratio^N
+				zoomWheel: 10,  // Mausrad: Faktor N
+				yaw: 0.6,       // 2-Finger-Drehen
+				pitch: 0.8      // 2-Finger-vertikal
 			};
 
 			// Mausrad (Desktop-Zoom)
@@ -129,22 +134,46 @@
 				rememberAll(ev);
 			}, captureOpts);
 
+			// Hilfsfunktion: Rotation um aktuellen Pivot (yaw+pitch aendern, position neu)
+			function rotateAroundPivot(view, dYaw, dPitch) {
+				const dir  = view.direction.clone();
+				const pos  = view.position.clone();
+				const piv  = pos.add(dir.multiplyScalar(view.radius));
+				view.yaw   = view.yaw   - dYaw;
+				view.pitch = view.pitch - dPitch;
+				const newDir = view.direction.clone();
+				const newPos = piv.sub(newDir.multiplyScalar(view.radius));
+				view.position.copy(newPos);
+			}
+
+			// Zoom um aktuellen Pivot (radius aendern, position bleibt am pivot-Vektor)
+			function zoomAroundPivot(view, ratio) {
+				const dir     = view.direction.clone();
+				const pos     = view.position.clone();
+				const piv     = pos.add(dir.multiplyScalar(view.radius));
+				view.radius   = Math.max(0.05, view.radius / ratio); // Boden 5cm
+				const newDir  = view.direction.clone();
+				const newPos  = piv.sub(newDir.multiplyScalar(view.radius));
+				view.position.copy(newPos);
+			}
+
 			renderArea.addEventListener('touchmove', (ev) => {
 				ev.preventDefault();
 				ev.stopImmediatePropagation();
 
-				const oc = viewer.orbitControls;
 				const view = viewer.scene.view;
 				const w = renderArea.clientWidth;
 				const h = renderArea.clientHeight;
+				const effRadius = Math.max(view.radius, SENS.panFloor);
 
 				if (ev.touches.length === 1) {
-					// 1 Finger: Pan
+					// 1 Finger: Pan (direkt, mit Boden gegen "Pan wird zu langsam bei Nah-Zoom")
 					const t = ev.touches[0];
 					const prev = stored.get(t.identifier);
 					if (prev) {
-						oc.panDelta.x += (t.pageX - prev.x) / w * SENS.pan;
-						oc.panDelta.y += (t.pageY - prev.y) / h * SENS.pan;
+						const dx = (t.pageX - prev.x) / w;
+						const dy = (t.pageY - prev.y) / h;
+						view.pan(-dx * effRadius * SENS.pan, dy * effRadius * SENS.pan);
 					}
 					stored.set(t.identifier, {x: t.pageX, y: t.pageY});
 				} else if (ev.touches.length === 2) {
@@ -164,22 +193,20 @@
 						const cang  = Math.atan2(cdy, cdx);
 						const ccy   = (t0.pageY + t1.pageY) / 2;
 
-						// Pinch -> Zoom
+						// Pinch -> Zoom (direkt)
 						if (pdist > 1) {
 							const ratio     = cdist / pdist;
 							const amplified = Math.pow(ratio, SENS.zoomPinch);
-							const resolved  = view.radius + oc.radiusDelta;
-							oc.radiusDelta += resolved / amplified - resolved;
+							zoomAroundPivot(view, amplified);
 						}
 
-						// Twist -> Yaw
+						// Twist -> Yaw + Vertikale Mittelpunkt-Bewegung -> Pitch (direkt)
 						let angleDelta = cang - pang;
 						while (angleDelta >  Math.PI) angleDelta -= 2 * Math.PI;
 						while (angleDelta < -Math.PI) angleDelta += 2 * Math.PI;
-						oc.yawDelta -= angleDelta * SENS.yaw;
-
-						// Vertikale Mittelpunkt-Bewegung -> Pitch
-						oc.pitchDelta -= (ccy - pcy) / h * SENS.pitch;
+						const dYaw   = angleDelta * SENS.yaw;
+						const dPitch = (ccy - pcy) / h * SENS.pitch;
+						rotateAroundPivot(view, dYaw, dPitch);
 
 						stored.set(t0.identifier, {x: t0.pageX, y: t0.pageY});
 						stored.set(t1.identifier, {x: t1.pageX, y: t1.pageY});
