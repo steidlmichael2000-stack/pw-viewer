@@ -89715,7 +89715,7 @@ ENDSEC
 				const tEnd = performance.now();
 
 				if(result.lowestSpacing !== Infinity){
-					let near = result.lowestSpacing * 10.0;
+					let near = result.lowestSpacing * 2.0;
 					let far = -this.getBoundingBox().applyMatrix4(camera.matrixWorldInverse).min.z;
 
 					far = Math.max(far * 1.5, 10000);

@@ -67,8 +67,9 @@
 
 		viewer.setDescription(`${displayName} — Drohnenaufnahme (WebODM)`);
 
-		// Mehr Punkte gleichzeitig sichtbar (Standard 1 Mio.).
-		// Hilft gegen "dünne Punktwolke bei Naheinstellung".
+		// Mehr Punkte gleichzeitig sichtbar (Standard 1 Mio.). Laedt feinere
+		// Octree-Stufen -> kleinerer Punktabstand -> Potrees Nah-Sichtgrenze
+		// (near plane = Punktabstand x N) sinkt -> man kommt naeher ran.
 		viewer.setPointBudget(3_000_000);
 
 		Potree.loadPointCloud(POINTCLOUD_URL, displayName, e => {
@@ -83,146 +84,194 @@
 			viewer.fitToScreen();
 
 			// =========================================================
-			// Touch-Steuerung im Google-Earth-Stil
+			// Touch-Steuerung im Google-Earth-Stil (raycast-basiert)
 			// =========================================================
-			// Wir fangen die Touch-Events VOR Potree ab (capture-Phase)
-			// und stoppen die Weitergabe, damit Potrees OrbitControls
-			// nicht "auch noch" was macht. Dann setzen wir selbst die
-			// Delta-Werte (yawDelta, pitchDelta, panDelta, radiusDelta),
-			// die Potrees Render-Loop pro Frame anwendet.
+			// Kern-Idee: Der Dreh-/Zoom-Mittelpunkt ("Pivot") ist NICHT
+			// der Wuerfel-Mittelpunkt (der schwebt in der Luft), sondern
+			// der ECHTE Oberflaechenpunkt unter den Fingern - per Raycast
+			// in die Punktwolke ermittelt. Dadurch:
+			//   - Zoom naehert sich der echten Oberflaeche (man kommt ran)
+			//   - Pan-Tempo skaliert mit Abstand zur Oberflaeche (1:1-Gefuehl)
 			//
-			// Gesten:
-			//   1 Finger drag           -> Pan (verschieben)
-			//   2 Finger auseinander/zu -> Zoom
-			//   2 Finger drehen         -> Yaw (Welt-Rotation)
-			//   2 Finger vertikal       -> Pitch (Welt-Neigung)
+			// Wir fangen Touch-Events vor Potree ab (capture + stopImmediate-
+			// Propagation) und steuern die Kamera direkt ueber view.*.
+			// Potrees OrbitControls.update() ist dann ein No-Op (alle Deltas 0).
 			//
-			// Empfindlichkeiten unten in SENS.* zum Nachtunen.
+			// Gesten:  1 Finger = Pan | 2 Finger Pinch = Zoom
+			//          2 Finger Drehen = Rotieren | 2 Finger vertikal = Neigen
+			//
+			// Feintuning live per URL: ?sens=zoom:1.5,pan:1,rot:1,pitch:1
 
 			const renderArea = document.getElementById("potree_render_area");
+			const canvas = viewer.renderer.domElement;
 
-			const SENS = {
-				pan: 1.2,       // pan-Empfindlichkeit (world = pan * effRadius * fraction)
-				panFloor: 5,    // effRadius = max(view.radius, panFloor) - Pan bleibt bei Nah-Zoom nutzbar
-				zoomPinch: 10,  // Pinch: ratio^N
-				zoomWheel: 10,  // Mausrad: Faktor N
-				yaw: -0.6,      // 2-Finger-Drehen (negativ = andere Richtung)
-				pitch: -0.8     // 2-Finger-vertikal (negativ = andere Richtung)
-			};
-
-			// Mausrad (Desktop-Zoom)
-			renderArea.addEventListener('wheel', (ev) => {
-				const view = viewer.scene.view;
-				const dir = ev.deltaY > 0 ? 1 : -1;
-				viewer.orbitControls.radiusDelta += dir * view.radius * 0.1 * SENS.zoomWheel;
-			}, {passive: true});
-
-			// Vorherige Touch-Positionen zwischen Events
-			const stored = new Map();
-			const captureOpts = {capture: true, passive: false};
-
-			const rememberAll = (ev) => {
-				stored.clear();
-				for (const t of ev.touches) {
-					stored.set(t.identifier, {x: t.pageX, y: t.pageY});
+			const SENS = { zoom: 1.6, pan: 1.0, rot: 1.0, pitch: 1.0 };
+			const sensParam = params.get("sens");
+			if (sensParam) {
+				for (const part of sensParam.split(",")) {
+					const [k, v] = part.split(":");
+					const num = parseFloat(v);
+					if (k in SENS && isFinite(num)) SENS[k] = num;
 				}
-			};
+			}
+
+			// Raycast: Bildschirm-Pixel (canvas-relativ) -> Oberflaechenpunkt.
+			// Gibt Vector3 (THREE-Instanz, hat .clone/.sub/.add/...) oder null.
+			function pickSurface(px, py) {
+				const cam = viewer.scene.getActiveCamera();
+				const I = Potree.Utils.getMousePointCloudIntersection(
+					{x: px, y: py}, cam, viewer, viewer.scene.pointclouds, {pickClipped: false});
+				return I ? I.location : null;
+			}
+
+			function canvasXY(t) {
+				const r = canvas.getBoundingClientRect();
+				return {x: t.clientX - r.left, y: t.clientY - r.top};
+			}
+
+			// Aktueller Gesten-Zustand: Pivot (Vector3) + letzte Fingerpositionen
+			let pivot = null;
+			let last = new Map();
+			let lastCount = 0;
+
+			function beginGesture(ev) {
+				const r = canvas.getBoundingClientRect();
+				let cx = 0, cy = 0;
+				for (const t of ev.touches) { cx += t.clientX - r.left; cy += t.clientY - r.top; }
+				cx /= ev.touches.length; cy /= ev.touches.length;
+
+				const hit = pickSurface(cx, cy);
+				if (hit) {
+					pivot = hit;
+				} else if (!pivot) {
+					// Fallback: aktueller Blickpunkt (kann in der Luft sein)
+					pivot = viewer.scene.view.getPivot();
+				}
+				last.clear();
+				for (const t of ev.touches) last.set(t.identifier, canvasXY(t));
+				lastCount = ev.touches.length;
+			}
+
+			const captureOpts = {capture: true, passive: false};
 
 			renderArea.addEventListener('touchstart', (ev) => {
 				ev.preventDefault();
 				ev.stopImmediatePropagation();
-				rememberAll(ev);
+				beginGesture(ev);
 			}, captureOpts);
-
-			// Hilfsfunktion: Rotation um aktuellen Pivot (yaw+pitch aendern, position neu)
-			function rotateAroundPivot(view, dYaw, dPitch) {
-				const dir  = view.direction.clone();
-				const pos  = view.position.clone();
-				const piv  = pos.add(dir.multiplyScalar(view.radius));
-				view.yaw   = view.yaw   - dYaw;
-				view.pitch = view.pitch - dPitch;
-				const newDir = view.direction.clone();
-				const newPos = piv.sub(newDir.multiplyScalar(view.radius));
-				view.position.copy(newPos);
-			}
-
-			// Zoom um aktuellen Pivot (radius aendern, position bleibt am pivot-Vektor)
-			function zoomAroundPivot(view, ratio) {
-				const dir     = view.direction.clone();
-				const pos     = view.position.clone();
-				const piv     = pos.add(dir.multiplyScalar(view.radius));
-				view.radius   = Math.max(0.05, view.radius / ratio); // Boden 5cm
-				const newDir  = view.direction.clone();
-				const newPos  = piv.sub(newDir.multiplyScalar(view.radius));
-				view.position.copy(newPos);
-			}
 
 			renderArea.addEventListener('touchmove', (ev) => {
 				ev.preventDefault();
 				ev.stopImmediatePropagation();
 
+				// Fingerzahl geaendert -> Geste neu aufsetzen (frischer Pivot)
+				if (ev.touches.length !== lastCount || !pivot) {
+					beginGesture(ev);
+					return;
+				}
+
 				const view = viewer.scene.view;
-				const w = renderArea.clientWidth;
 				const h = renderArea.clientHeight;
-				const effRadius = Math.max(view.radius, SENS.panFloor);
+				const camPos = view.position;
+				const distToPivot = camPos.distanceTo(pivot);
 
 				if (ev.touches.length === 1) {
-					// 1 Finger: Pan (direkt, mit Boden gegen "Pan wird zu langsam bei Nah-Zoom")
+					// --- 1 Finger: Pan entlang der Oberflaeche ---
 					const t = ev.touches[0];
-					const prev = stored.get(t.identifier);
+					const prev = last.get(t.identifier);
+					const cur = canvasXY(t);
 					if (prev) {
-						const dx = (t.pageX - prev.x) / w;
-						const dy = (t.pageY - prev.y) / h;
-						view.pan(-dx * effRadius * SENS.pan, dy * effRadius * SENS.pan);
+						// Weltgroesse eines Pixels in Pivot-Tiefe (exaktes 1:1-Tracking)
+						const fovRad = viewer.getFOV() * Math.PI / 180;
+						const worldPerPixel = 2 * distToPivot * Math.tan(fovRad / 2) / h;
+						const dx = (cur.x - prev.x) * worldPerPixel * SENS.pan;
+						const dy = (cur.y - prev.y) * worldPerPixel * SENS.pan;
+						view.pan(-dx, dy);
 					}
-					stored.set(t.identifier, {x: t.pageX, y: t.pageY});
+					last.set(t.identifier, cur);
 				} else if (ev.touches.length === 2) {
-					// 2 Finger: Pinch (Zoom) + Twist (Yaw) + Vertikal (Pitch)
-					const t0 = ev.touches[0];
-					const t1 = ev.touches[1];
-					const p0 = stored.get(t0.identifier);
-					const p1 = stored.get(t1.identifier);
+					// --- 2 Finger: Zoom + Rotieren + Neigen, alles um den Pivot ---
+					const t0 = ev.touches[0], t1 = ev.touches[1];
+					const c0 = canvasXY(t0), c1 = canvasXY(t1);
+					const p0 = last.get(t0.identifier), p1 = last.get(t1.identifier);
 					if (p0 && p1) {
-						const pdx = p0.x - p1.x, pdy = p0.y - p1.y;
-						const pdist = Math.hypot(pdx, pdy);
-						const pang  = Math.atan2(pdy, pdx);
+						const pdist = Math.hypot(p0.x - p1.x, p0.y - p1.y);
+						const cdist = Math.hypot(c0.x - c1.x, c0.y - c1.y);
+						const pang  = Math.atan2(p0.y - p1.y, p0.x - p1.x);
+						const cang  = Math.atan2(c0.y - c1.y, c0.x - c1.x);
 						const pcy   = (p0.y + p1.y) / 2;
+						const ccy   = (c0.y + c1.y) / 2;
 
-						const cdx = t0.pageX - t1.pageX, cdy = t0.pageY - t1.pageY;
-						const cdist = Math.hypot(cdx, cdy);
-						const cang  = Math.atan2(cdy, cdx);
-						const ccy   = (t0.pageY + t1.pageY) / 2;
-
-						// Pinch -> Zoom (direkt)
-						if (pdist > 1) {
-							const ratio     = cdist / pdist;
-							const amplified = Math.pow(ratio, SENS.zoomPinch);
-							zoomAroundPivot(view, amplified);
+						// Pinch -> Zoom auf den Oberflaechen-Pivot zu/weg
+						if (pdist > 10 && Math.abs(cdist - pdist) > 1) {
+							const ratio = Math.pow(cdist / pdist, SENS.zoom);
+							let newDist = distToPivot / ratio;
+							newDist = Math.max(0.3, newDist); // nicht durch die Oberflaeche
+							const move = distToPivot - newDist; // >0 = naeher ran
+							const dir = pivot.clone().sub(camPos).normalize();
+							camPos.add(dir.multiplyScalar(move));
 						}
 
-						// Twist -> Yaw + Vertikale Mittelpunkt-Bewegung -> Pitch (direkt)
-						let angleDelta = cang - pang;
-						while (angleDelta >  Math.PI) angleDelta -= 2 * Math.PI;
-						while (angleDelta < -Math.PI) angleDelta += 2 * Math.PI;
-						const dYaw   = angleDelta * SENS.yaw;
-						const dPitch = (ccy - pcy) / h * SENS.pitch;
-						rotateAroundPivot(view, dYaw, dPitch);
+						// Twist -> Rotation um vertikale Achse durch den Pivot
+						let dAng = cang - pang;
+						while (dAng >  Math.PI) dAng -= 2 * Math.PI;
+						while (dAng < -Math.PI) dAng += 2 * Math.PI;
+						if (Math.abs(dAng) > 0.008) {
+							const dYaw = dAng * SENS.rot;
+							const zAxis = pivot.clone().set(0, 0, 1);
+							const rel = view.position.clone().sub(pivot).applyAxisAngle(zAxis, dYaw);
+							view.position.copy(pivot.clone().add(rel));
+							view.yaw += dYaw;
+						}
 
-						stored.set(t0.identifier, {x: t0.pageX, y: t0.pageY});
-						stored.set(t1.identifier, {x: t1.pageX, y: t1.pageY});
+						// Vertikale Mittelpunkt-Bewegung -> Neigen (Pitch) um Pivot
+						const dyMid = (ccy - pcy) / h;
+						if (Math.abs(dyMid) > 0.004) {
+							const dPitch = dyMid * SENS.pitch;
+							const clamped = Math.max(-1.5, Math.min(1.5, view.pitch + dPitch));
+							const applied = clamped - view.pitch;
+							if (applied !== 0) {
+								const side = view.getSide();
+								const rel = view.position.clone().sub(pivot).applyAxisAngle(side, applied);
+								view.position.copy(pivot.clone().add(rel));
+								view.pitch = clamped;
+							}
+						}
 					}
+					last.set(t0.identifier, c0);
+					last.set(t1.identifier, c1);
 				}
 			}, captureOpts);
 
-			renderArea.addEventListener('touchend', (ev) => {
-				ev.preventDefault();
+			const endHandler = (ev) => {
+				if (ev.cancelable) ev.preventDefault();
 				ev.stopImmediatePropagation();
-				rememberAll(ev);
-			}, captureOpts);
+				if (ev.touches.length === 0) {
+					pivot = null;
+					last.clear();
+					lastCount = 0;
+				} else {
+					beginGesture(ev); // Restfinger -> Geste neu aufsetzen
+				}
+			};
+			renderArea.addEventListener('touchend', endHandler, captureOpts);
+			renderArea.addEventListener('touchcancel', endHandler, captureOpts);
 
-			renderArea.addEventListener('touchcancel', (ev) => {
-				rememberAll(ev);
-			}, captureOpts);
+			// --- Desktop: Mausrad zoomt auf Punkt unter dem Cursor ---
+			renderArea.addEventListener('wheel', (ev) => {
+				ev.preventDefault();
+				const r = canvas.getBoundingClientRect();
+				const hit = pickSurface(ev.clientX - r.left, ev.clientY - r.top);
+				const view = viewer.scene.view;
+				const target = hit || view.getPivot();
+				const camPos = view.position;
+				const dist = camPos.distanceTo(target);
+				const step = ev.deltaY < 0 ? 0.25 : -0.25; // rein / raus
+				let newDist = Math.max(0.3, dist * (1 - step));
+				const move = dist - newDist;
+				const dir = target.clone().sub(camPos).normalize();
+				camPos.add(dir.multiplyScalar(move));
+			}, {passive: false, capture: true});
 		});
 	</script>
 </body>
