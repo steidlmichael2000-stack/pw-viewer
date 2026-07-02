@@ -90,7 +90,7 @@
 			//
 			// Kein 3-Finger. Feintuning per URL: ?sens=rot:1,zoom:1,pan:1
 
-			const VERSION = "v15";
+			const VERSION = "v16";
 			const renderArea = document.getElementById("potree_render_area");
 			const canvas = viewer.renderer.domElement;
 			const oc = viewer.orbitControls;
@@ -113,6 +113,36 @@
 					if (k in SENS && isFinite(n)) SENS[k] = n;
 				}
 			}
+			// Gespeicherten Zoom-Wert laden (falls vorhanden), sonst Default/URL
+			const savedZoom = parseFloat(localStorage.getItem("pw_zoom"));
+			if (isFinite(savedZoom)) SENS.zoom = savedZoom;
+
+			// --- Regler fuer Zoom-Geschwindigkeit (unten rechts) ---
+			const ctrl = document.createElement("div");
+			ctrl.style.cssText = "position:absolute;right:8px;bottom:8px;z-index:10000;" +
+				"background:rgba(0,0,0,0.6);color:#fff;font:13px sans-serif;" +
+				"padding:8px 10px;border-radius:8px;min-width:160px;";
+			ctrl.innerHTML =
+				'<div style="display:flex;justify-content:space-between;margin-bottom:4px;">' +
+				'<span>Zoom-Tempo</span><span id="pw_zoomval"></span></div>';
+			const slider = document.createElement("input");
+			slider.type = "range";
+			slider.min = "0.3"; slider.max = "4"; slider.step = "0.1";
+			slider.value = String(SENS.zoom);
+			slider.style.width = "100%";
+			ctrl.appendChild(slider);
+			document.body.appendChild(ctrl);
+			const zoomVal = ctrl.querySelector("#pw_zoomval");
+			function updZoomLabel() { zoomVal.textContent = SENS.zoom.toFixed(1) + "x"; }
+			updZoomLabel();
+			slider.addEventListener("input", () => {
+				SENS.zoom = parseFloat(slider.value);
+				localStorage.setItem("pw_zoom", String(SENS.zoom));
+				updZoomLabel();
+			});
+			// Gesten auf dem Regler nicht an den Viewer weiterreichen
+			["touchstart", "touchmove", "touchend", "wheel", "pointerdown"].forEach(evt =>
+				ctrl.addEventListener(evt, e => e.stopPropagation()));
 
 			const ROT_SPEED = 5; // entspricht Potrees interner rotationSpeed
 			function canvasXY(t) {
