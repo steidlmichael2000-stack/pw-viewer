@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+	<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+	<meta http-equiv="Pragma" content="no-cache">
+	<meta http-equiv="Expires" content="0">
+	<title>Punktwolken-Viewer</title>
+
+	<link rel="stylesheet" type="text/css" href="build/potree/potree.css">
+	<link rel="stylesheet" type="text/css" href="libs/jquery-ui/jquery-ui.min.css">
+	<link rel="stylesheet" type="text/css" href="libs/openlayers3/ol.css">
+	<link rel="stylesheet" type="text/css" href="libs/spectrum/spectrum.css">
+	<link rel="stylesheet" type="text/css" href="libs/jstree/themes/mixed/style.css">
+</head>
+
+<body>
+	<script src="libs/jquery/jquery-3.1.1.min.js"></script>
+	<script src="libs/spectrum/spectrum.js"></script>
+	<script src="libs/jquery-ui/jquery-ui.min.js"></script>
+	<script src="libs/other/BinaryHeap.js"></script>
+	<script src="libs/tween/tween.min.js"></script>
+	<script src="libs/d3/d3.js"></script>
+	<script src="libs/proj4/proj4.js"></script>
+	<script src="libs/openlayers3/ol.js"></script>
+	<script src="libs/i18next/i18next.js"></script>
+	<script src="libs/jstree/jstree.js"></script>
+	<script src="build/potree/potree.js"></script>
+	<script src="libs/plasio/js/laslaz.js"></script>
+
+	<div class="potree_container" style="position: absolute; width: 100%; height: 100%; left: 0px; top: 0px;">
+		<div id="potree_render_area" style="background-image: url('build/potree/resources/images/background.jpg');"></div>
+		<div id="potree_sidebar_container"></div>
+	</div>
+
+	<a href="index.html" style="position:absolute;right:8px;top:8px;z-index:10000;background:rgba(0,0,0,0.6);color:#fff;font:14px sans-serif;text-decoration:none;padding:8px 12px;border-radius:6px;">← Übersicht</a>
+
+	<script type="module">
+		window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
+
+		viewer.setEDLEnabled(true);
+		viewer.setFOV(60);
+		viewer.setPointBudget(1_000_000);
+		viewer.loadSettingsFromURL();
+		viewer.setBackground("skybox");
+		viewer.loadGUI(() => {
+			viewer.setLanguage('de');
+			$("#menu_tools").next().show();
+			$("#menu_clipping").next().show();
+			$("#potree_sidebar_container").hide();
+
+			// Hamburger-Icon: zusätzlich die Sidebar wirklich ein-/ausblenden
+			// (Potrees toggleSidebar schiebt nur die Render-Fläche, blendet
+			// die Sidebar selbst aber nicht aus).
+			$(".potree_menu_toggle").on("click", () => {
+				$("#potree_sidebar_container").toggle();
+			});
+		});
+
+		const R2_BASE = "https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev";
+		const DEFAULT_PC = "geckenheim";
+
+		// Punktwolken-Name aus URL-Parameter ?p=<name> auslesen.
+		// Nur Kleinbuchstaben/Ziffern/_/- erlaubt, sonst Default.
+		const params = new URLSearchParams(window.location.search);
+		const rawName = params.get("p") || DEFAULT_PC;
+		const pcName = /^[a-z0-9_-]+$/.test(rawName) ? rawName : DEFAULT_PC;
+
+		const POINTCLOUD_URL = `${R2_BASE}/${pcName}/metadata.json`;
+		const displayName = pcName.charAt(0).toUpperCase() + pcName.slice(1);
+
+		viewer.setDescription(`${displayName} — Drohnenaufnahme (WebODM)`);
+
+		// Mehr Punkte gleichzeitig sichtbar (Standard 1 Mio.). Laedt feinere
+		// Octree-Stufen -> kleinerer Punktabstand -> Potrees Nah-Sichtgrenze
+		// (near plane = Punktabstand x N) sinkt -> man kommt naeher ran.
+		viewer.setPointBudget(3_000_000);
+
+		Potree.loadPointCloud(POINTCLOUD_URL, displayName, e => {
+			let scene = viewer.scene;
+			let pointcloud = e.pointcloud;
+			let material = pointcloud.material;
+			material.size = 2;
+			material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+			material.shape = Potree.PointShape.SQUARE;
+
+			scene.addPointCloud(pointcloud);
+			viewer.fitToScreen();
+
+			// =========================================================
+			// Touch-Steuerung im Google-Earth-Stil (raycast-basiert)
+			// =========================================================
+			// Kern-Idee: Der Dreh-/Zoom-Mittelpunkt ("Pivot") ist NICHT
+			// der Wuerfel-Mittelpunkt (der schwebt in der Luft), sondern
+			// der ECHTE Oberflaechenpunkt unter den Fingern - per Raycast
+			// in die Punktwolke ermittelt. Dadurch:
+			//   - Zoom naehert sich der echten Oberflaeche (man kommt ran)
+			//   - Pan-Tempo skaliert mit Abstand zur Oberflaeche (1:1-Gefuehl)
+			//
+			// Wir fangen Touch-Events vor Potree ab (capture + stopImmediate-
+			// Propagation) und steuern die Kamera direkt ueber view.*.
+			// Potrees OrbitControls.update() ist dann ein No-Op (alle Deltas 0).
+			//
+			// Gesten:  1 Finger = Pan | 2 Finger Pinch = Zoom
+			//          2 Finger Drehen = Rotieren | 2 Finger vertikal = Neigen
+			//
+			// Feintuning live per URL: ?sens=zoom:1.5,pan:1,rot:1,pitch:1
+
+			const VERSION = "v12";
+			const renderArea = document.getElementById("potree_render_area");
+			const canvas = viewer.renderer.domElement;
+
+			// Sichtbares Versions-/Debug-Schild unten links.
+			const badge = document.createElement("div");
+			badge.style.cssText = "position:absolute;left:8px;bottom:8px;z-index:10000;" +
+				"background:rgba(0,0,0,0.6);color:#0f0;font:12px monospace;" +
+				"padding:4px 7px;border-radius:4px;pointer-events:none;white-space:pre;";
+			badge.textContent = "PW " + VERSION;
+			document.body.appendChild(badge);
+			function setBadge(txt) { badge.textContent = "PW " + VERSION + "  " + txt; }
+
+			const SENS = { zoom: 1.6, pan: 1.0, rot: 1.0, pitch: 1.0 };
+			const sensParam = params.get("sens");
+			if (sensParam) {
+				for (const part of sensParam.split(",")) {
+					const [k, v] = part.split(":");
+					const num = parseFloat(v);
+					if (k in SENS && isFinite(num)) SENS[k] = num;
+				}
+			}
+
+			// Garantiert endlicher Referenzpunkt nahe den Daten (Notfall-Pivot).
+			// Aus der WELT-Bounding-Box (lokale bbox + matrixWorld-Verschiebung),
+			// damit er auch stimmt, falls fitToScreen noch nicht gegriffen hat.
+			let safeCenter;
+			{
+				pointcloud.updateMatrixWorld(true);
+				const bb = pointcloud.boundingBox;
+				const mw = pointcloud.matrixWorld.elements;
+				safeCenter = bb.min.clone().add(bb.max).multiplyScalar(0.5);
+				safeCenter.x += mw[12]; safeCenter.y += mw[13]; safeCenter.z += mw[14];
+				if (!(isFinite(safeCenter.x) && isFinite(safeCenter.y) && isFinite(safeCenter.z))) {
+					safeCenter.set(0, 0, 0);
+				}
+			}
+			let groundZ = safeCenter.z; // Hoehe der Boden-Ebene fuer Fallback-Raycast
+
+			const finite = (v) => v && isFinite(v.x) && isFinite(v.y) && isFinite(v.z);
+			const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+
+			// Echter Oberflaechenpunkt per GPU-Picking (oder null).
+			function pickSurface(px, py) {
+				try {
+					const I = Potree.Utils.getMousePointCloudIntersection(
+						{x: px, y: py}, viewer.scene.getActiveCamera(), viewer,
+						viewer.scene.pointclouds, {pickClipped: false});
+					return (I && finite(I.location)) ? I.location : null;
+				} catch (e) { return null; }
+			}
+
+			// Fallback: Fingerstrahl schneidet horizontale Ebene z = groundZ.
+			function rayToGround(px, py) {
+				try {
+					const ray = Potree.Utils.mouseToRay(
+						{x: px, y: py}, viewer.scene.getActiveCamera(),
+						canvas.clientWidth, canvas.clientHeight);
+					if (!ray || Math.abs(ray.direction.z) < 1e-6) return null;
+					const t = (groundZ - ray.origin.z) / ray.direction.z;
+					if (!(t > 0) || !isFinite(t)) return null;
+					const p = ray.origin.clone().add(ray.direction.clone().multiplyScalar(t));
+					return finite(p) ? p : null;
+				} catch (e) { return null; }
+			}
+
+			// Liefert IMMER einen endlichen Pivot (nie Luft/Unendlich).
+			function pickPivot(px, py) {
+				const hit = pickSurface(px, py);
+				if (hit) { lastGoodPivot = hit.clone(); groundZ = hit.z; return {p: hit, src: "FLAECHE z=" + Math.round(hit.z)}; }
+				const gp = rayToGround(px, py);
+				if (gp) return {p: gp, src: "EBENE z=" + Math.round(gp.z)};
+				if (lastGoodPivot) return {p: lastGoodPivot.clone(), src: "letzter"};
+				return {p: safeCenter.clone(), src: "ZENTRUM"};
+			}
+
+			function canvasXY(t) {
+				const r = canvas.getBoundingClientRect();
+				return {x: t.clientX - r.left, y: t.clientY - r.top};
+			}
+
+			let pivot = null;
+			let lastGoodPivot = null;
+			let last = new Map();
+			let lastCount = 0;
+
+			function beginGesture(ev) {
+				const r = canvas.getBoundingClientRect();
+				let cx = 0, cy = 0;
+				const n = Math.min(ev.touches.length, 2);
+				for (let i = 0; i < n; i++) { cx += ev.touches[i].clientX - r.left; cy += ev.touches[i].clientY - r.top; }
+				cx /= n; cy /= n;
+
+				const res = pickPivot(cx, cy);
+				pivot = res.p;
+				setBadge(ev.touches.length + "F  Pivot:" + res.src);
+				last.clear();
+				for (const t of ev.touches) last.set(t.identifier, canvasXY(t));
+				lastCount = ev.touches.length;
+			}
+
+			const captureOpts = {capture: true, passive: false};
+
+			renderArea.addEventListener('touchstart', (ev) => {
+				ev.preventDefault();
+				ev.stopImmediatePropagation();
+				beginGesture(ev);
+			}, captureOpts);
+
+			renderArea.addEventListener('touchmove', (ev) => {
+				ev.preventDefault();
+				ev.stopImmediatePropagation();
+
+				// Fingerzahl geaendert oder kein Pivot -> Geste neu aufsetzen
+				if (ev.touches.length !== lastCount || !finite(pivot)) {
+					beginGesture(ev);
+					return;
+				}
+
+				const view = viewer.scene.view;
+				const h = renderArea.clientHeight;
+				const camPos = view.position;
+
+				// Sicherungskopie fuer den Fall, dass etwas NaN produziert
+				const snapPos = camPos.clone();
+				const snapYaw = view.yaw, snapPitch = view.pitch;
+
+				const distToPivot = clamp(camPos.distanceTo(pivot), 0.3, 50000);
+
+				if (ev.touches.length === 1) {
+					// --- 1 Finger: Pan entlang der Oberflaeche ---
+					const t = ev.touches[0];
+					const prev = last.get(t.identifier);
+					const cur = canvasXY(t);
+					if (prev) {
+						const fovRad = viewer.getFOV() * Math.PI / 180;
+						const worldPerPixel = 2 * distToPivot * Math.tan(fovRad / 2) / h;
+						const dx = (cur.x - prev.x) * worldPerPixel * SENS.pan;
+						const dy = (cur.y - prev.y) * worldPerPixel * SENS.pan;
+						view.pan(-dx, dy);
+					}
+					last.set(t.identifier, cur);
+				} else if (ev.touches.length >= 2) {
+					// --- 2+ Finger: Zoom + Rotieren + Neigen um den Pivot ---
+					const t0 = ev.touches[0], t1 = ev.touches[1];
+					const c0 = canvasXY(t0), c1 = canvasXY(t1);
+					const p0 = last.get(t0.identifier), p1 = last.get(t1.identifier);
+					if (p0 && p1) {
+						const pdist = Math.hypot(p0.x - p1.x, p0.y - p1.y);
+						const cdist = Math.hypot(c0.x - c1.x, c0.y - c1.y);
+						const pang  = Math.atan2(p0.y - p1.y, p0.x - p1.x);
+						const cang  = Math.atan2(c0.y - c1.y, c0.x - c1.x);
+						const pcy   = (p0.y + p1.y) / 2;
+						const ccy   = (c0.y + c1.y) / 2;
+
+						// Pinch -> Zoom auf den Pivot zu/weg
+						if (pdist > 10 && Math.abs(cdist - pdist) > 1 && cdist > 1) {
+							const ratio = Math.pow(cdist / pdist, SENS.zoom);
+							let newDist = clamp(distToPivot / ratio, 0.3, 50000);
+							const move = distToPivot - newDist;
+							const toPivot = pivot.clone().sub(camPos);
+							const len = toPivot.length();
+							if (len > 1e-4) camPos.add(toPivot.multiplyScalar(move / len));
+						}
+
+						// Twist -> Rotation um vertikale Achse durch den Pivot
+						let dAng = cang - pang;
+						while (dAng >  Math.PI) dAng -= 2 * Math.PI;
+						while (dAng < -Math.PI) dAng += 2 * Math.PI;
+						if (Math.abs(dAng) > 0.008) {
+							const dYaw = dAng * SENS.rot;
+							const zAxis = pivot.clone().set(0, 0, 1);
+							const rel = view.position.clone().sub(pivot).applyAxisAngle(zAxis, dYaw);
+							view.position.copy(pivot.clone().add(rel));
+							view.yaw += dYaw;
+						}
+
+						// Vertikale Mittelpunkt-Bewegung -> Neigen (Pitch)
+						const dyMid = (ccy - pcy) / h;
+						if (Math.abs(dyMid) > 0.004) {
+							const dPitch = dyMid * SENS.pitch;
+							const clamped = clamp(view.pitch + dPitch, -1.5, 1.5);
+							const applied = clamped - view.pitch;
+							if (applied !== 0) {
+								const side = view.getSide();
+								const rel = view.position.clone().sub(pivot).applyAxisAngle(side, applied);
+								view.position.copy(pivot.clone().add(rel));
+								view.pitch = clamped;
+							}
+						}
+					}
+					last.set(t0.identifier, c0);
+					last.set(t1.identifier, c1);
+				}
+
+				// Notbremse: falls etwas NaN/Unendlich erzeugt hat -> zuruecksetzen
+				if (!finite(view.position)) {
+					view.position.copy(snapPos);
+					view.yaw = snapYaw;
+					view.pitch = snapPitch;
+					setBadge("Reset (ungueltige Kamera abgefangen)");
+				}
+			}, captureOpts);
+
+			const endHandler = (ev) => {
+				if (ev.cancelable) ev.preventDefault();
+				ev.stopImmediatePropagation();
+				if (ev.touches.length === 0) {
+					pivot = null;
+					last.clear();
+					lastCount = 0;
+				} else {
+					beginGesture(ev);
+				}
+			};
+			renderArea.addEventListener('touchend', endHandler, captureOpts);
+			renderArea.addEventListener('touchcancel', endHandler, captureOpts);
+
+			// --- Desktop: Mausrad zoomt auf Punkt unter dem Cursor ---
+			renderArea.addEventListener('wheel', (ev) => {
+				ev.preventDefault();
+				const r = canvas.getBoundingClientRect();
+				const view = viewer.scene.view;
+				const res = pickPivot(ev.clientX - r.left, ev.clientY - r.top);
+				const target = res.p;
+				const camPos = view.position;
+				const snapPos = camPos.clone();
+				const dist = clamp(camPos.distanceTo(target), 0.3, 50000);
+				const step = ev.deltaY < 0 ? 0.25 : -0.25;
+				const newDist = clamp(dist * (1 - step), 0.3, 50000);
+				const move = dist - newDist;
+				const toTarget = target.clone().sub(camPos);
+				const len = toTarget.length();
+				if (len > 1e-4) camPos.add(toTarget.multiplyScalar(move / len));
+				if (!finite(view.position)) view.position.copy(snapPos);
+			}, {passive: false, capture: true});
+		});
+	</script>
+</body>
+</html>
