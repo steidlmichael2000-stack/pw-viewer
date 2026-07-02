@@ -3,6 +3,9 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+	<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+	<meta http-equiv="Pragma" content="no-cache">
+	<meta http-equiv="Expires" content="0">
 	<title>Punktwolken-Viewer</title>
 
 	<link rel="stylesheet" type="text/css" href="build/potree/potree.css">
@@ -102,8 +105,20 @@
 			//
 			// Feintuning live per URL: ?sens=zoom:1.5,pan:1,rot:1,pitch:1
 
+			const VERSION = "v8";
 			const renderArea = document.getElementById("potree_render_area");
 			const canvas = viewer.renderer.domElement;
+
+			// Sichtbares Versions-/Debug-Schild unten links. Zeigt, welche
+			// Version wirklich geladen ist (gegen Cache-Verwirrung) und beim
+			// Zoomen, ob der Pivot auf der OBERFLAECHE oder in der LUFT liegt.
+			const badge = document.createElement("div");
+			badge.style.cssText = "position:absolute;left:8px;bottom:8px;z-index:10000;" +
+				"background:rgba(0,0,0,0.6);color:#0f0;font:12px monospace;" +
+				"padding:4px 7px;border-radius:4px;pointer-events:none;white-space:pre;";
+			badge.textContent = "PW " + VERSION;
+			document.body.appendChild(badge);
+			function setBadge(txt) { badge.textContent = "PW " + VERSION + "  " + txt; }
 
 			const SENS = { zoom: 1.6, pan: 1.0, rot: 1.0, pitch: 1.0 };
 			const sensParam = params.get("sens");
@@ -131,6 +146,7 @@
 
 			// Aktueller Gesten-Zustand: Pivot (Vector3) + letzte Fingerpositionen
 			let pivot = null;
+			let lastGoodPivot = null; // letzter erfolgreicher Oberflaechen-Treffer
 			let last = new Map();
 			let lastCount = 0;
 
@@ -141,12 +157,20 @@
 				cx /= ev.touches.length; cy /= ev.touches.length;
 
 				const hit = pickSurface(cx, cy);
+				let src;
 				if (hit) {
 					pivot = hit;
-				} else if (!pivot) {
-					// Fallback: aktueller Blickpunkt (kann in der Luft sein)
+					lastGoodPivot = hit.clone();
+					src = "OBERFLAECHE z=" + Math.round(hit.z);
+				} else if (lastGoodPivot) {
+					pivot = lastGoodPivot.clone();
+					src = "letzter Treffer z=" + Math.round(pivot.z);
+				} else {
+					// Notfall: Blickpunkt (kann in der Luft sein)
 					pivot = viewer.scene.view.getPivot();
+					src = "LUFT z=" + Math.round(pivot.z);
 				}
+				setBadge(ev.touches.length + "F  Pivot:" + src);
 				last.clear();
 				for (const t of ev.touches) last.set(t.identifier, canvasXY(t));
 				lastCount = ev.touches.length;
