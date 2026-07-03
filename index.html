@@ -65,6 +65,8 @@
 			<circle cx="8" cy="13" r="1.3"/><circle cx="14" cy="12" r="1.3"/><circle cx="19" cy="15" r="1.3"/>
 			<circle cx="5" cy="17" r="1.3"/><circle cx="11" cy="18" r="1.3"/><circle cx="16" cy="19" r="1.3"/></svg>`;
 
+		const R2_BASE = "https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev";
+
 		function card(pc) {
 			const div = document.createElement("div");
 			div.className = "card";
@@ -73,8 +75,11 @@
 			if (pc.model) {
 				actions += '<a class="act" href="model.html?p=' + enc + '">3D-Modell</a>';
 			}
+			const thumbHtml = pc.thumb
+				? '<div class="thumb" style="background-image:url(\'' + R2_BASE + '/' + enc + '/thumb.jpg\');background-size:cover;background-position:center"></div>'
+				: '<div class="thumb">' + POINT_ICON + '</div>';
 			div.innerHTML =
-				'<div class="thumb">' + POINT_ICON + '</div>' +
+				thumbHtml +
 				'<div class="body">' +
 					'<div class="title"></div>' +
 					'<div class="desc"></div>' +
