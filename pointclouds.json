@@ -19,6 +19,11 @@
                             "name":  "sonnenstra_e_gollhofen",
                             "title":  "Sonnenstraße Gollhofen",
                             "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)"
+                        },
+                        {
+                            "name":  "pfarrhof_gollhofen",
+                            "title":  "Pfarrhof Gollhofen",
+                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)"
                         }
                     ]
 }
