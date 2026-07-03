@@ -17,6 +17,15 @@
 		/* Potrees VR-Knopf und Hamburger ausblenden (nicht gebraucht) */
 		#VRButton, .potree_menu_toggle { display: none !important; }
 
+		/* Projekt-Titel oben mittig: Schrift wie in der Uebersicht */
+		#potree_description {
+			font-family: -apple-system,"Segoe UI",Roboto,sans-serif !important;
+			font-weight: 600 !important;
+			font-size: 20px !important;
+			letter-spacing: .01em;
+			text-shadow: 0 1px 3px rgba(0,0,0,0.85), 0 0 2px rgba(0,0,0,0.9);
+		}
+
 		/* Einstellungen: Zahnrad-Knopf oben links */
 		#pw-gear {
 			position: absolute; left: 10px; top: 10px; z-index: 10000;
@@ -138,7 +147,7 @@
 			//
 			// Kein 3-Finger. Feintuning per URL: ?sens=rot:1,zoom:1,pan:1
 
-			const VERSION = "v18";
+			const VERSION = "v19";
 			const renderArea = document.getElementById("potree_render_area");
 			const canvas = viewer.renderer.domElement;
 			const oc = viewer.orbitControls;
@@ -146,13 +155,14 @@
 			// Versions-/Debug-Schild unten links
 			const badge = document.createElement("div");
 			badge.style.cssText = "position:absolute;left:8px;bottom:8px;z-index:10000;" +
-				"background:rgba(0,0,0,0.6);color:#0f0;font:12px monospace;" +
-				"padding:4px 7px;border-radius:4px;pointer-events:none;white-space:pre;";
+				"background:rgba(36,40,46,0.85);color:#6ab0f3;" +
+				"font:12px -apple-system,'Segoe UI',Roboto,sans-serif;font-weight:600;" +
+				"padding:5px 9px;border-radius:8px;pointer-events:none;white-space:pre;";
 			badge.textContent = "PW " + VERSION;
 			document.body.appendChild(badge);
 			function setBadge(t) { badge.textContent = "PW " + VERSION + "  " + t; }
 
-			const SENS = { rot: 1.0, zoom: 1.0, pan: 1.0 };
+			const SENS = { rot: 1.0, zoom: 4.0, pan: 1.0 };
 			const sensParam = params.get("sens");
 			if (sensParam) {
 				for (const part of sensParam.split(",")) {
@@ -162,7 +172,7 @@
 				}
 			}
 			// Gespeicherten Zoom-Wert laden (falls vorhanden)
-			const savedZoom = parseFloat(localStorage.getItem("pw_zoom"));
+			const savedZoom = parseFloat(localStorage.getItem("pw_zoom2"));
 			if (isFinite(savedZoom)) SENS.zoom = savedZoom;
 
 			// --- Einstellungen: Zahnrad-Knopf (oben links) + Panel ---
@@ -184,7 +194,7 @@
 					'<button class="pw-bg-btn" data-bg="white">Weiß</button>' +
 				'</div>' +
 				'<h3>Zoom-Tempo <span id="pw-zoomval"></span></h3>' +
-				'<input id="pw-zoom" type="range" min="0.3" max="4" step="0.1">';
+				'<input id="pw-zoom" type="range" min="0.3" max="6" step="0.1">';
 			document.body.appendChild(panel);
 
 			gear.addEventListener("click", () => panel.classList.toggle("open"));
@@ -209,7 +219,7 @@
 			updZoomLabel();
 			zoomSlider.addEventListener("input", () => {
 				SENS.zoom = parseFloat(zoomSlider.value);
-				localStorage.setItem("pw_zoom", String(SENS.zoom));
+				localStorage.setItem("pw_zoom2", String(SENS.zoom));
 				updZoomLabel();
 			});
 
