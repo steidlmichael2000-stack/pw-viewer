@@ -35,10 +35,17 @@
 			background: radial-gradient(circle at 50% 40%, #2f3843, #1c2127);
 		}
 		.thumb svg { width: 64px; height: 64px; opacity: .55; }
-		.body { padding: 14px 16px 18px; }
+		.body { padding: 14px 16px 16px; }
 		.title { font-size: 17px; font-weight: 600; }
 		.desc { color: #9aa0a6; font-size: 13px; margin-top: 5px; line-height: 1.4; }
-		.open { margin-top: 12px; color: #6ab0f3; font-size: 13px; font-weight: 600; }
+		.actions { display: flex; gap: 8px; margin-top: 12px; }
+		.act {
+			flex: 1; text-align: center; text-decoration: none;
+			padding: 8px 6px; border-radius: 8px; font-size: 13px; font-weight: 600;
+			border: 1px solid #3a4450; color: #e8e8e8; background: #2b3038;
+		}
+		.act.primary { background: #31465f; border-color: #4a90d9; color: #fff; }
+		.act:active { background: #3a4a5e; }
 		.empty, .error { max-width: 1100px; margin: 40px auto; color: #9aa0a6; text-align: center; }
 		.error { color: #e0736b; }
 	</style>
@@ -59,19 +66,23 @@
 			<circle cx="5" cy="17" r="1.3"/><circle cx="11" cy="18" r="1.3"/><circle cx="16" cy="19" r="1.3"/></svg>`;
 
 		function card(pc) {
-			const a = document.createElement("a");
-			a.className = "card";
-			a.href = "view.html?p=" + encodeURIComponent(pc.name);
-			a.innerHTML =
+			const div = document.createElement("div");
+			div.className = "card";
+			const enc = encodeURIComponent(pc.name);
+			let actions = '<a class="act primary" href="view.html?p=' + enc + '">Punktwolke</a>';
+			if (pc.model) {
+				actions += '<a class="act" href="model.html?p=' + enc + '">3D-Modell</a>';
+			}
+			div.innerHTML =
 				'<div class="thumb">' + POINT_ICON + '</div>' +
 				'<div class="body">' +
 					'<div class="title"></div>' +
 					'<div class="desc"></div>' +
-					'<div class="open">Öffnen →</div>' +
+					'<div class="actions">' + actions + '</div>' +
 				'</div>';
-			a.querySelector(".title").textContent = pc.title || pc.name;
-			a.querySelector(".desc").textContent = pc.description || "";
-			return a;
+			div.querySelector(".title").textContent = pc.title || pc.name;
+			div.querySelector(".desc").textContent = pc.description || "";
+			return div;
 		}
 
 		fetch("pointclouds.json?nocache=" + Date.now())

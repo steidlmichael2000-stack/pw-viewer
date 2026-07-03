@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+	<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+	<title>3D-Modell</title>
+	<style>
+		* { box-sizing: border-box; margin: 0; padding: 0; }
+		html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1d21; }
+		#c { width: 100%; height: 100%; display: block; touch-action: none; }
+		#title {
+			position: absolute; top: 10px; left: 0; right: 0; text-align: center;
+			color: #fff; font: 600 20px -apple-system,"Segoe UI",Roboto,sans-serif;
+			text-shadow: 0 1px 3px rgba(0,0,0,.85); pointer-events: none; z-index: 5;
+		}
+		#back {
+			position: absolute; right: 8px; top: 8px; z-index: 10;
+			background: rgba(36,40,46,.85); color: #fff; font: 14px sans-serif;
+			text-decoration: none; padding: 8px 12px; border-radius: 8px;
+		}
+		#badge {
+			position: absolute; left: 8px; bottom: 8px; z-index: 10;
+			background: rgba(36,40,46,.85); color: #6ab0f3;
+			font: 600 12px -apple-system,"Segoe UI",Roboto,sans-serif;
+			padding: 5px 9px; border-radius: 8px;
+		}
+		#loading {
+			position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+			color: #cfd3d7; font: 15px -apple-system,"Segoe UI",Roboto,sans-serif; z-index: 8;
+			background: #1a1d21;
+		}
+		#err { color: #e0736b; padding: 0 24px; text-align: center; }
+	</style>
+	<script type="importmap">
+	{
+		"imports": {
+			"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+			"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+		}
+	}
+	</script>
+</head>
+<body>
+	<canvas id="c"></canvas>
+	<div id="title"></div>
+	<a id="back" href="index.html">← Übersicht</a>
+	<div id="badge">Modell v1</div>
+	<div id="loading">Modell wird geladen …</div>
+
+	<script type="module">
+		import * as THREE from 'three';
+		import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+		import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+		import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+		const R2_BASE = "https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev";
+		const params = new URLSearchParams(location.search);
+		const raw = params.get("p") || "";
+		const pcName = /^[a-z0-9_-]+$/.test(raw) ? raw : "";
+		const GLB_URL = pcName ? `${R2_BASE}/${pcName}/model.glb` : "";
+
+		const loadingEl = document.getElementById("loading");
+		function fail(msg) { loadingEl.innerHTML = '<div id="err">' + msg + '</div>'; }
+
+		if (!GLB_URL) { fail("Kein Modell angegeben."); throw new Error("no model"); }
+
+		// Projekt-Titel aus pointclouds.json
+		fetch("pointclouds.json?nocache=" + Date.now())
+			.then(r => r.ok ? r.json() : null)
+			.then(d => {
+				const e = d && (d.pointclouds || []).find(x => x.name === pcName);
+				if (e) document.getElementById("title").textContent = e.title;
+			}).catch(() => {});
+
+		const canvas = document.getElementById("c");
+		const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+		renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+		renderer.setSize(innerWidth, innerHeight);
+		renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+		const scene = new THREE.Scene();
+		scene.background = new THREE.Color(0x1a1d21);
+
+		const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 100000);
+		camera.up.set(0, 0, 1); // WebODM-Modelle sind Z-up (geografisch)
+
+		// Licht: Himmel/Boden + Sonne, damit Texturen natuerlich wirken
+		scene.add(new THREE.HemisphereLight(0xffffff, 0x556070, 2.2));
+		const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+		sun.position.set(1, 1, 2);
+		scene.add(sun);
+
+		const controls = new OrbitControls(camera, canvas);
+		controls.enableDamping = true;
+		controls.dampingFactor = 0.08;
+
+		const draco = new DRACOLoader();
+		draco.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/");
+		const loader = new GLTFLoader();
+		loader.setDRACOLoader(draco);
+
+		loader.load(GLB_URL, (gltf) => {
+			const model = gltf.scene;
+			scene.add(model);
+
+			// Modell zentrieren (grosse UTM-Koordinaten -> sonst Ruckeln durch Float-Ungenauigkeit)
+			const box = new THREE.Box3().setFromObject(model);
+			const center = box.getCenter(new THREE.Vector3());
+			const size = box.getSize(new THREE.Vector3());
+			model.position.sub(center);
+
+			const radius = Math.max(size.x, size.y, size.z);
+			controls.target.set(0, 0, 0);
+			camera.position.set(radius * 0.6, -radius * 0.9, radius * 0.7);
+			camera.near = radius / 1000;
+			camera.far = radius * 100;
+			camera.updateProjectionMatrix();
+			controls.update();
+
+			loadingEl.style.display = "none";
+		}, (ev) => {
+			if (ev.total) {
+				const pct = Math.round(ev.loaded / ev.total * 100);
+				loadingEl.textContent = "Modell wird geladen … " + pct + "%";
+			}
+		}, (e) => {
+			fail("Modell konnte nicht geladen werden.<br>" + (e && e.message ? e.message : ""));
+		});
+
+		addEventListener("resize", () => {
+			camera.aspect = innerWidth / innerHeight;
+			camera.updateProjectionMatrix();
+			renderer.setSize(innerWidth, innerHeight);
+		});
+
+		(function animate() {
+			requestAnimationFrame(animate);
+			controls.update();
+			renderer.render(scene, camera);
+		})();
+	</script>
+</body>
+</html>
