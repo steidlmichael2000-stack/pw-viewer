@@ -27,7 +27,8 @@
                         {
                             "name":  "pfarrhof_gollhofen",
                             "title":  "Pfarrhof Gollhofen",
-                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)"
+                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
+                            "model":  true
                         }
                     ]
 }
