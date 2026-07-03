@@ -13,6 +13,45 @@
 	<link rel="stylesheet" type="text/css" href="libs/openlayers3/ol.css">
 	<link rel="stylesheet" type="text/css" href="libs/spectrum/spectrum.css">
 	<link rel="stylesheet" type="text/css" href="libs/jstree/themes/mixed/style.css">
+	<style>
+		/* Potrees VR-Knopf und Hamburger ausblenden (nicht gebraucht) */
+		#VRButton, .potree_menu_toggle { display: none !important; }
+
+		/* Einstellungen: Zahnrad-Knopf oben links */
+		#pw-gear {
+			position: absolute; left: 10px; top: 10px; z-index: 10000;
+			width: 46px; height: 46px; border: none; border-radius: 12px;
+			background: rgba(36,40,46,0.85); color: #fff; font-size: 22px; line-height: 1;
+			display: flex; align-items: center; justify-content: center; cursor: pointer;
+			box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+		}
+		#pw-gear:active { background: #31465f; }
+
+		/* Einstellungs-Panel */
+		#pw-panel {
+			position: absolute; left: 10px; top: 66px; z-index: 10000;
+			width: 240px; max-width: calc(100vw - 20px);
+			background: rgba(36,40,46,0.94); color: #e8e8e8;
+			border: 1px solid #3a4450; border-radius: 14px; padding: 14px 16px 16px;
+			font-family: -apple-system,"Segoe UI",Roboto,sans-serif; font-size: 14px;
+			box-shadow: 0 6px 20px rgba(0,0,0,0.4); display: none;
+		}
+		#pw-panel.open { display: block; }
+		#pw-panel h3 {
+			font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
+			color: #9aa0a6; margin: 0 0 8px; font-weight: 600;
+		}
+		#pw-panel h3:not(:first-child) { margin-top: 16px; }
+		.pw-bg-row { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+		.pw-bg-btn {
+			padding: 9px 6px; border: 1px solid #3a4450; border-radius: 9px;
+			background: #2b3038; color: #e8e8e8; font-size: 13px; cursor: pointer;
+			transition: background .12s, border-color .12s;
+		}
+		.pw-bg-btn.active { border-color: #4a90d9; background: #31465f; color: #fff; }
+		#pw-zoom { width: 100%; accent-color: #4a90d9; margin-top: 2px; }
+		#pw-zoomval { float: right; color: #6ab0f3; font-weight: 600; }
+	</style>
 </head>
 
 <body>
@@ -43,7 +82,7 @@
 		viewer.setFOV(60);
 		viewer.setPointBudget(1_000_000);
 		viewer.loadSettingsFromURL();
-		viewer.setBackground("skybox");
+		viewer.setBackground(localStorage.getItem("pw_bg") || "skybox");
 		viewer.loadGUI(() => {
 			viewer.setLanguage('de');
 			$("#menu_tools").next().show();
@@ -62,7 +101,16 @@
 		const pcName = /^[a-z0-9_-]+$/.test(rawName) ? rawName : DEFAULT_PC;
 		const POINTCLOUD_URL = `${R2_BASE}/${pcName}/metadata.json`;
 		const displayName = pcName.charAt(0).toUpperCase() + pcName.slice(1);
-		viewer.setDescription(`${displayName} — Drohnenaufnahme (WebODM)`);
+		// Titel oben mittig = Projektname aus der Uebersicht (pointclouds.json).
+		// Bis geladen: leer (nicht der haessliche technische Name).
+		viewer.setDescription("");
+		fetch("pointclouds.json?nocache=" + Date.now())
+			.then(r => r.ok ? r.json() : null)
+			.then(d => {
+				const entry = d && (d.pointclouds || []).find(x => x.name === pcName);
+				viewer.setDescription(entry ? entry.title : "");
+			})
+			.catch(() => {});
 		viewer.setPointBudget(3_000_000);
 
 		Potree.loadPointCloud(POINTCLOUD_URL, displayName, e => {
@@ -90,7 +138,7 @@
 			//
 			// Kein 3-Finger. Feintuning per URL: ?sens=rot:1,zoom:1,pan:1
 
-			const VERSION = "v16";
+			const VERSION = "v17";
 			const renderArea = document.getElementById("potree_render_area");
 			const canvas = viewer.renderer.domElement;
 			const oc = viewer.orbitControls;
@@ -113,36 +161,62 @@
 					if (k in SENS && isFinite(n)) SENS[k] = n;
 				}
 			}
-			// Gespeicherten Zoom-Wert laden (falls vorhanden), sonst Default/URL
+			// Gespeicherten Zoom-Wert laden (falls vorhanden)
 			const savedZoom = parseFloat(localStorage.getItem("pw_zoom"));
 			if (isFinite(savedZoom)) SENS.zoom = savedZoom;
 
-			// --- Regler fuer Zoom-Geschwindigkeit (unten rechts) ---
-			const ctrl = document.createElement("div");
-			ctrl.style.cssText = "position:absolute;right:8px;bottom:8px;z-index:10000;" +
-				"background:rgba(0,0,0,0.6);color:#fff;font:13px sans-serif;" +
-				"padding:8px 10px;border-radius:8px;min-width:160px;";
-			ctrl.innerHTML =
-				'<div style="display:flex;justify-content:space-between;margin-bottom:4px;">' +
-				'<span>Zoom-Tempo</span><span id="pw_zoomval"></span></div>';
-			const slider = document.createElement("input");
-			slider.type = "range";
-			slider.min = "0.3"; slider.max = "4"; slider.step = "0.1";
-			slider.value = String(SENS.zoom);
-			slider.style.width = "100%";
-			ctrl.appendChild(slider);
-			document.body.appendChild(ctrl);
-			const zoomVal = ctrl.querySelector("#pw_zoomval");
+			// --- Einstellungen: Zahnrad-Knopf (oben links) + Panel ---
+			const gear = document.createElement("button");
+			gear.id = "pw-gear";
+			gear.type = "button";
+			gear.innerHTML = "&#9881;"; // Zahnrad-Symbol
+			gear.setAttribute("aria-label", "Einstellungen");
+			document.body.appendChild(gear);
+
+			const panel = document.createElement("div");
+			panel.id = "pw-panel";
+			panel.innerHTML =
+				'<h3>Hintergrund</h3>' +
+				'<div class="pw-bg-row">' +
+					'<button class="pw-bg-btn" data-bg="skybox">Himmel</button>' +
+					'<button class="pw-bg-btn" data-bg="gradient">Verlauf</button>' +
+					'<button class="pw-bg-btn" data-bg="black">Schwarz</button>' +
+					'<button class="pw-bg-btn" data-bg="white">Weiß</button>' +
+				'</div>' +
+				'<h3>Zoom-Tempo <span id="pw-zoomval"></span></h3>' +
+				'<input id="pw-zoom" type="range" min="0.3" max="4" step="0.1">';
+			document.body.appendChild(panel);
+
+			gear.addEventListener("click", () => panel.classList.toggle("open"));
+
+			// Hintergrund-Auswahl
+			const bgBtns = panel.querySelectorAll(".pw-bg-btn");
+			function setActiveBg(bg) {
+				bgBtns.forEach(b => b.classList.toggle("active", b.dataset.bg === bg));
+			}
+			setActiveBg(localStorage.getItem("pw_bg") || "skybox");
+			bgBtns.forEach(b => b.addEventListener("click", () => {
+				viewer.setBackground(b.dataset.bg);
+				localStorage.setItem("pw_bg", b.dataset.bg);
+				setActiveBg(b.dataset.bg);
+			}));
+
+			// Zoom-Tempo-Regler (im Panel)
+			const zoomSlider = panel.querySelector("#pw-zoom");
+			const zoomVal = panel.querySelector("#pw-zoomval");
+			zoomSlider.value = String(SENS.zoom);
 			function updZoomLabel() { zoomVal.textContent = SENS.zoom.toFixed(1) + "x"; }
 			updZoomLabel();
-			slider.addEventListener("input", () => {
-				SENS.zoom = parseFloat(slider.value);
+			zoomSlider.addEventListener("input", () => {
+				SENS.zoom = parseFloat(zoomSlider.value);
 				localStorage.setItem("pw_zoom", String(SENS.zoom));
 				updZoomLabel();
 			});
-			// Gesten auf dem Regler nicht an den Viewer weiterreichen
-			["touchstart", "touchmove", "touchend", "wheel", "pointerdown"].forEach(evt =>
-				ctrl.addEventListener(evt, e => e.stopPropagation()));
+
+			// Gesten auf Knopf/Panel nicht an den Viewer weiterreichen
+			[gear, panel].forEach(el =>
+				["touchstart", "touchmove", "touchend", "wheel", "pointerdown"].forEach(evt =>
+					el.addEventListener(evt, e => e.stopPropagation())));
 
 			const ROT_SPEED = 5; // entspricht Potrees interner rotationSpeed
 			function canvasXY(t) {
@@ -168,7 +242,6 @@
 				ev.preventDefault();
 				ev.stopImmediatePropagation();
 				remember(ev);
-				setBadge(ev.touches.length + "F");
 			}, capOpts);
 
 			renderArea.addEventListener('touchmove', (ev) => {
