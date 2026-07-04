@@ -7,8 +7,13 @@
 	<title>3D-Modell</title>
 	<style>
 		* { box-sizing: border-box; margin: 0; padding: 0; }
-		html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1d21; }
-		#c { width: 100%; height: 100%; display: block; touch-action: none; }
+		html, body { width: 100%; height: 100%; overflow: hidden; }
+		/* Hintergrund liegt hinter dem transparenten Canvas */
+		body { background: radial-gradient(circle at 50% 30%, #3a4453, #14171b); }
+		body.bg-black { background: #000; }
+		body.bg-white { background: #fff; }
+		body.bg-gray { background: #808080; }
+		#c { width: 100%; height: 100%; display: block; touch-action: none; position: relative; z-index: 1; }
 		#title {
 			position: absolute; top: 14px; left: 14px; right: 120px;
 			color: #fff; font: 600 15px -apple-system,"Segoe UI",Roboto,sans-serif;
@@ -33,6 +38,28 @@
 			display: flex; align-items: center; justify-content: center;
 		}
 		#fs svg { width: 22px; height: 22px; }
+		/* Einstellungen (Zahnrad + Panel) */
+		#pw-gear {
+			position: absolute; left: 10px; top: 10px; z-index: 20;
+			width: 46px; height: 46px; border: none; border-radius: 12px; cursor: pointer;
+			background: rgba(36,40,46,0.85); color: #fff; font-size: 22px; line-height: 1;
+			display: flex; align-items: center; justify-content: center;
+		}
+		#pw-gear:active { background: #31465f; }
+		#pw-panel {
+			position: absolute; left: 10px; top: 66px; z-index: 20;
+			width: 220px; max-width: calc(100vw - 20px);
+			background: rgba(36,40,46,0.94); color: #e8e8e8;
+			border: 1px solid #3a4450; border-radius: 14px; padding: 14px 16px 16px;
+			font-family: -apple-system,"Segoe UI",Roboto,sans-serif; font-size: 14px; display: none;
+		}
+		#pw-panel.open { display: block; }
+		#pw-panel h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
+			color: #9aa0a6; margin: 0 0 8px; font-weight: 600; }
+		.pw-bg-row { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+		.pw-bg-btn { padding: 9px 6px; border: 1px solid #3a4450; border-radius: 9px;
+			background: #2b3038; color: #e8e8e8; font-size: 13px; cursor: pointer; }
+		.pw-bg-btn.active { border-color: #4a90d9; background: #31465f; color: #fff; }
 	</style>
 	<script type="importmap">
 	{
@@ -47,6 +74,16 @@
 	<canvas id="c"></canvas>
 	<div id="title"></div>
 	<a id="back" href="index.html">← Übersicht</a>
+	<button id="pw-gear" aria-label="Einstellungen">&#9881;</button>
+	<div id="pw-panel">
+		<h3>Hintergrund</h3>
+		<div class="pw-bg-row">
+			<button class="pw-bg-btn" data-bg="gradient">Verlauf</button>
+			<button class="pw-bg-btn" data-bg="black">Schwarz</button>
+			<button class="pw-bg-btn" data-bg="white">Weiß</button>
+			<button class="pw-bg-btn" data-bg="gray">Grau</button>
+		</div>
+	</div>
 	<button id="fs" aria-label="Vollbild" title="Vollbild">
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 			<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
@@ -79,13 +116,30 @@
 			}).catch(() => {});
 
 		const canvas = document.getElementById("c");
-		const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+		const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 		renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 		renderer.setSize(innerWidth, innerHeight);
+		renderer.setClearAlpha(0);   // transparent -> CSS-Hintergrund (body) scheint durch
 		renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-		const scene = new THREE.Scene();
-		scene.background = new THREE.Color(0x1a1d21);
+		const scene = new THREE.Scene(); // kein scene.background -> Canvas transparent
+
+		// Hintergrund-Auswahl (per CSS am body), gespeichert
+		function setBg(name) {
+			document.body.classList.remove("bg-black", "bg-white", "bg-gray");
+			if (name === "black") document.body.classList.add("bg-black");
+			else if (name === "white") document.body.classList.add("bg-white");
+			else if (name === "gray") document.body.classList.add("bg-gray");
+			localStorage.setItem("pw_model_bg", name);
+			document.querySelectorAll(".pw-bg-btn").forEach(b =>
+				b.classList.toggle("active", b.dataset.bg === name));
+		}
+		const gear = document.getElementById("pw-gear");
+		const panel = document.getElementById("pw-panel");
+		gear.addEventListener("click", () => panel.classList.toggle("open"));
+		document.querySelectorAll(".pw-bg-btn").forEach(b =>
+			b.addEventListener("click", () => setBg(b.dataset.bg)));
+		setBg(localStorage.getItem("pw_model_bg") || "gradient");
 
 		const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 100000);
 		camera.up.set(0, 0, 1); // WebODM-Modelle sind Z-up (geografisch)

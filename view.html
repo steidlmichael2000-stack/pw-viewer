@@ -110,7 +110,7 @@
 		viewer.setFOV(60);
 		viewer.setPointBudget(1_000_000);
 		viewer.loadSettingsFromURL();
-		viewer.setBackground(localStorage.getItem("pw_bg") || "skybox");
+		viewer.setBackground(localStorage.getItem("pw_bg") || "gradient");
 		viewer.loadGUI(() => {
 			viewer.setLanguage('de');
 			$("#menu_tools").next().show();
@@ -166,7 +166,7 @@
 			//
 			// Kein 3-Finger. Feintuning per URL: ?sens=rot:1,zoom:1,pan:1
 
-			const VERSION = "v21";   // nur intern (Deploy-Check), kein sichtbares Schild mehr
+			const VERSION = "v22";   // nur intern (Deploy-Check), kein sichtbares Schild mehr
 			const renderArea = document.getElementById("potree_render_area");
 			const canvas = viewer.renderer.domElement;
 			const oc = viewer.orbitControls;
@@ -213,7 +213,7 @@
 			function setActiveBg(bg) {
 				bgBtns.forEach(b => b.classList.toggle("active", b.dataset.bg === bg));
 			}
-			setActiveBg(localStorage.getItem("pw_bg") || "skybox");
+			setActiveBg(localStorage.getItem("pw_bg") || "gradient");
 			bgBtns.forEach(b => b.addEventListener("click", () => {
 				viewer.setBackground(b.dataset.bg);
 				localStorage.setItem("pw_bg", b.dataset.bg);

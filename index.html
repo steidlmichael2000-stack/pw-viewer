@@ -49,16 +49,21 @@
 		.empty, .error { max-width: 1100px; margin: 40px auto; color: #9aa0a6; text-align: center; }
 		.error { color: #e0736b; }
 		.act.share { flex: 0 0 auto; padding: 8px 12px; }
+		.act.share svg { width: 16px; height: 16px; display: block; }
 		/* Teilen-Dialog */
 		#share { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none;
 			align-items: center; justify-content: center; z-index: 100; padding: 16px; }
 		#share.open { display: flex; }
-		.share-box { background: #24282e; border: 1px solid #3a4450; border-radius: 14px;
-			padding: 20px; width: 320px; max-width: 100%; text-align: center; }
-		.share-box h3 { font-size: 17px; margin-bottom: 14px; }
-		#qr { background: #fff; padding: 10px; border-radius: 8px; }
+		.share-box { position: relative; background: #24282e; border: 1px solid #3a4450;
+			border-radius: 14px; padding: 20px; width: 320px; max-width: 100%; text-align: center; }
+		.share-box h3 { font-size: 17px; margin-bottom: 14px; padding: 0 24px; }
+		#share-x { position: absolute; top: 8px; right: 12px; background: none; border: none;
+			color: #9aa0a6; font-size: 26px; line-height: 1; cursor: pointer; padding: 2px 6px; }
+		#share-x:active { color: #fff; }
+		#qr { background: #fff; padding: 10px; border-radius: 8px; display: inline-block; }
 		.share-url { color: #9aa0a6; font-size: 12px; word-break: break-all; margin: 12px 0; }
-		.share-actions { display: flex; gap: 8px; }
+		.share-actions { display: flex; }
+		.share-actions .act { flex: 1; }
 	</style>
 </head>
 <body>
@@ -72,12 +77,12 @@
 
 	<div id="share">
 		<div class="share-box">
+			<button id="share-x" aria-label="Schließen">×</button>
 			<h3 id="share-title"></h3>
 			<div id="qr"></div>
 			<div class="share-url" id="share-url"></div>
 			<div class="share-actions">
 				<button class="act primary" id="share-copy">Link kopieren</button>
-				<button class="act" id="share-close">Schließen</button>
 			</div>
 		</div>
 	</div>
@@ -90,6 +95,7 @@
 			<circle cx="5" cy="17" r="1.3"/><circle cx="11" cy="18" r="1.3"/><circle cx="16" cy="19" r="1.3"/></svg>`;
 
 		const R2_BASE = "https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev";
+		const SHARE_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>';
 
 		function shareUrl(pc) {
 			return new URL("view.html?p=" + encodeURIComponent(pc.name), location.href).href;
@@ -103,7 +109,7 @@
 			if (pc.model) {
 				actions += '<a class="act" href="model.html?p=' + enc + '">3D-Modell</a>';
 			}
-			actions += '<button class="act share" type="button">Teilen</button>';
+			actions += '<button class="act share" type="button" aria-label="Teilen" title="Teilen">' + SHARE_ICON + '</button>';
 			const thumbHtml = pc.thumb
 				? '<div class="thumb" style="background-image:url(\'' + R2_BASE + '/' + enc + '/thumb.jpg\');background-size:cover;background-position:center"></div>'
 				: '<div class="thumb">' + POINT_ICON + '</div>';
@@ -134,7 +140,7 @@
 			}
 			shareEl.classList.add("open");
 		}
-		document.getElementById("share-close").addEventListener("click", () => shareEl.classList.remove("open"));
+		document.getElementById("share-x").addEventListener("click", () => shareEl.classList.remove("open"));
 		shareEl.addEventListener("click", (e) => { if (e.target === shareEl) shareEl.classList.remove("open"); });
 		document.getElementById("share-copy").addEventListener("click", () => {
 			const btn = document.getElementById("share-copy");
