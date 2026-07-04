@@ -38,7 +38,9 @@
                         {
                             "name":  "weinbergsh_tte_ippesheim",
                             "title":  "Weinbergshütte Ippesheim",
-                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)"
+                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
+                            "model":  true,
+                            "thumb":  true
                         }
                     ]
 }
