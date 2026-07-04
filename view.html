@@ -290,6 +290,11 @@
 					'<button class="pw-bg-btn" data-bg="black">Schwarz</button>' +
 					'<button class="pw-bg-btn" data-bg="white">Weiß</button>' +
 				'</div>' +
+				'<h3>Ansicht</h3>' +
+				'<div class="pw-bg-row">' +
+					'<button class="pw-bg-btn pw-proj-btn" data-proj="perspective">Perspektive</button>' +
+					'<button class="pw-bg-btn pw-proj-btn" data-proj="ortho">Orthografisch</button>' +
+				'</div>' +
 				'<h3>Zoom-Tempo <span id="pw-zoomval"></span></h3>' +
 				'<input id="pw-zoom" type="range" min="0.3" max="6" step="0.1">';
 			document.body.appendChild(panel);
@@ -297,7 +302,7 @@
 			gear.addEventListener("click", () => panel.classList.toggle("open"));
 
 			// Hintergrund-Auswahl
-			const bgBtns = panel.querySelectorAll(".pw-bg-btn");
+			const bgBtns = panel.querySelectorAll("[data-bg]");
 			function setActiveBg(bg) {
 				bgBtns.forEach(b => b.classList.toggle("active", b.dataset.bg === bg));
 			}
@@ -307,6 +312,16 @@
 				localStorage.setItem("pw_bg", b.dataset.bg);
 				setActiveBg(b.dataset.bg);
 			}));
+
+			// Ansicht: Perspektive / Orthografisch (Potree-eigene Umschaltung)
+			const projBtns = panel.querySelectorAll("[data-proj]");
+			function setProjection(mode) {
+				viewer.setCameraMode(mode === "ortho" ? Potree.CameraMode.ORTHOGRAPHIC : Potree.CameraMode.PERSPECTIVE);
+				localStorage.setItem("pw_proj", mode);
+				projBtns.forEach(b => b.classList.toggle("active", b.dataset.proj === mode));
+			}
+			projBtns.forEach(b => b.addEventListener("click", () => setProjection(b.dataset.proj)));
+			setProjection(localStorage.getItem("pw_proj") || "perspective");
 
 			// Zoom-Tempo-Regler (im Panel)
 			const zoomSlider = panel.querySelector("#pw-zoom");

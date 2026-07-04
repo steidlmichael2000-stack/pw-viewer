@@ -105,6 +105,11 @@
 			<button class="pw-bg-btn" data-bg="white">Weiß</button>
 			<button class="pw-bg-btn" data-bg="gray">Grau</button>
 		</div>
+		<h3 style="margin-top:16px">Ansicht</h3>
+		<div class="pw-bg-row">
+			<button class="pw-bg-btn pw-proj-btn" data-proj="perspective">Perspektive</button>
+			<button class="pw-bg-btn pw-proj-btn" data-proj="ortho">Orthografisch</button>
+		</div>
 	</div>
 	<button id="fs" aria-label="Vollbild" title="Vollbild">
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -196,18 +201,23 @@
 			else if (name === "white") document.body.classList.add("bg-white");
 			else if (name === "gray") document.body.classList.add("bg-gray");
 			localStorage.setItem("pw_model_bg", name);
-			document.querySelectorAll(".pw-bg-btn").forEach(b =>
+			document.querySelectorAll("[data-bg]").forEach(b =>
 				b.classList.toggle("active", b.dataset.bg === name));
 		}
 		const gear = document.getElementById("pw-gear");
 		const panel = document.getElementById("pw-panel");
 		gear.addEventListener("click", () => panel.classList.toggle("open"));
-		document.querySelectorAll(".pw-bg-btn").forEach(b =>
+		document.querySelectorAll("[data-bg]").forEach(b =>
 			b.addEventListener("click", () => setBg(b.dataset.bg)));
 		setBg(localStorage.getItem("pw_model_bg") || "gradient");
 
-		const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 100000);
+		const FOV = 60;
+		const camera = new THREE.PerspectiveCamera(FOV, innerWidth / innerHeight, 0.1, 100000);
 		camera.up.set(0, 0, 1); // WebODM-Modelle sind Z-up (geografisch)
+		// Zweite Kamera fuer orthografische Ansicht (Frustum wird beim Umschalten gesetzt)
+		const orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100000);
+		orthoCam.up.set(0, 0, 1);
+		let activeCamera = camera;
 
 		// Licht: Himmel/Boden + Sonne, damit Texturen natuerlich wirken
 		scene.add(new THREE.HemisphereLight(0xffffff, 0x556070, 2.2));
@@ -218,6 +228,43 @@
 		const controls = new OrbitControls(camera, canvas);
 		controls.enableDamping = true;
 		controls.dampingFactor = 0.08;
+
+		// Ansicht: Perspektive / Orthografisch. Beim Umschalten Blickrichtung und
+		// sichtbare Groesse beibehalten, damit der Wechsel nahtlos aussieht.
+		const HALF_FOV_TAN = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
+		const projBtns = document.querySelectorAll("[data-proj]");
+		let projMode = "perspective";
+		function setProjection(mode) {
+			mode = (mode === "ortho") ? "ortho" : "perspective";
+			projBtns.forEach(b => b.classList.toggle("active", b.dataset.proj === mode));
+			localStorage.setItem("pw_model_proj", mode);
+			if (mode === projMode) return;
+			const from = activeCamera;
+			const dir = new THREE.Vector3().subVectors(from.position, controls.target);
+			const dist = dir.length() || 1;
+			const aspect = innerWidth / innerHeight;
+			if (mode === "ortho") {
+				const half = HALF_FOV_TAN * dist;              // sichtbare Halbhoehe der Perspektive
+				orthoCam.position.copy(from.position);
+				orthoCam.up.copy(from.up);
+				orthoCam.top = half; orthoCam.bottom = -half;
+				orthoCam.left = -half * aspect; orthoCam.right = half * aspect;
+				orthoCam.zoom = 1;
+				orthoCam.near = camera.near; orthoCam.far = camera.far;
+				orthoCam.updateProjectionMatrix();
+			} else {
+				const effHalf = orthoCam.top / orthoCam.zoom;  // aktuelle sichtbare Halbhoehe (inkl. Zoom)
+				dir.setLength(effHalf / HALF_FOV_TAN);
+				camera.position.copy(controls.target).add(dir);
+				camera.up.copy(from.up);
+				camera.updateProjectionMatrix();
+			}
+			activeCamera = (mode === "ortho") ? orthoCam : camera;
+			controls.object = activeCamera;
+			controls.update();
+			projMode = mode;
+		}
+		projBtns.forEach(b => b.addEventListener("click", () => setProjection(b.dataset.proj)));
 
 		const draco = new DRACOLoader();
 		draco.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/");
@@ -242,6 +289,9 @@
 			camera.updateProjectionMatrix();
 			controls.update();
 
+			// Gespeicherte Ansicht (Perspektive/Ortho) anwenden, jetzt ist die Kamera gesetzt
+			setProjection(localStorage.getItem("pw_model_proj") || "perspective");
+
 			loadingEl.style.display = "none";
 		}, (ev) => {
 			if (ev.total) {
@@ -265,15 +315,20 @@
 		});
 
 		addEventListener("resize", () => {
-			camera.aspect = innerWidth / innerHeight;
+			const aspect = innerWidth / innerHeight;
+			camera.aspect = aspect;
 			camera.updateProjectionMatrix();
+			const halfH = orthoCam.top;
+			orthoCam.left = -halfH * aspect;
+			orthoCam.right = halfH * aspect;
+			orthoCam.updateProjectionMatrix();
 			renderer.setSize(innerWidth, innerHeight);
 		});
 
 		(function animate() {
 			requestAnimationFrame(animate);
 			controls.update();
-			renderer.render(scene, camera);
+			renderer.render(scene, activeCamera);
 		})();
 	</script>
 </body>
