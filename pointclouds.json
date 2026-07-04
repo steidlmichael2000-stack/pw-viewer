@@ -1,39 +1,44 @@
 {
-  "pointclouds": [
-    {
-      "name": "geckenheim",
-      "title": "EÜ Geckenheim",
-      "description": "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
-      "model": true,
-      "thumb": true
-    },
-    {
-      "name": "task-of-2026-05-20t145513945z-georeferenced_model",
-      "title": "Kreisgrabenanlage Ippesheim",
-      "description": "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
-      "model": true,
-      "thumb": true
-    },
-    {
-      "name": "kettenbrunnen_gollhofen",
-      "title": "Kettenbrunnen Gollhofen",
-      "description": "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
-      "model": true,
-      "thumb": true
-    },
-    {
-      "name": "sonnenstra_e_gollhofen",
-      "title": "Sonnenstraße Gollhofen",
-      "description": "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
-      "model": true,
-      "thumb": true
-    },
-    {
-      "name": "pfarrhof_gollhofen",
-      "title": "Pfarrhof Gollhofen",
-      "description": "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
-      "model": true,
-      "thumb": true
-    }
-  ]
+    "pointclouds":  [
+                        {
+                            "name":  "geckenheim",
+                            "title":  "EÜ Geckenheim",
+                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
+                            "model":  true,
+                            "thumb":  true
+                        },
+                        {
+                            "name":  "task-of-2026-05-20t145513945z-georeferenced_model",
+                            "title":  "Kreisgrabenanlage Ippesheim",
+                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
+                            "model":  true,
+                            "thumb":  true
+                        },
+                        {
+                            "name":  "kettenbrunnen_gollhofen",
+                            "title":  "Kettenbrunnen Gollhofen",
+                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
+                            "model":  true,
+                            "thumb":  true
+                        },
+                        {
+                            "name":  "sonnenstra_e_gollhofen",
+                            "title":  "Sonnenstraße Gollhofen",
+                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
+                            "model":  true,
+                            "thumb":  true
+                        },
+                        {
+                            "name":  "pfarrhof_gollhofen",
+                            "title":  "Pfarrhof Gollhofen",
+                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
+                            "model":  true,
+                            "thumb":  true
+                        },
+                        {
+                            "name":  "weinbergsh_tte_ippesheim",
+                            "title":  "Weinbergshütte Ippesheim",
+                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)"
+                        }
+                    ]
 }
