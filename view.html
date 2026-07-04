@@ -61,6 +61,13 @@
 		.pw-bg-btn.active { border-color: #4a90d9; background: #31465f; color: #fff; }
 		#pw-zoom { width: 100%; accent-color: #4a90d9; margin-top: 2px; }
 		#pw-zoomval { float: right; color: #6ab0f3; font-weight: 600; }
+		#fs {
+			position: absolute; right: 12px; bottom: 12px; z-index: 10000;
+			width: 44px; height: 44px; border: none; border-radius: 10px; cursor: pointer;
+			background: rgba(36,40,46,0.85); color: #fff;
+			display: flex; align-items: center; justify-content: center;
+		}
+		#fs svg { width: 22px; height: 22px; }
 	</style>
 </head>
 
@@ -84,6 +91,17 @@
 	</div>
 
 	<a href="index.html" style="position:absolute;right:8px;top:8px;z-index:10000;background:rgba(0,0,0,0.6);color:#fff;font:14px sans-serif;text-decoration:none;padding:8px 12px;border-radius:6px;">← Übersicht</a>
+
+	<button id="fs" aria-label="Vollbild" title="Vollbild">
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+			<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+	</button>
+	<script>
+		document.getElementById("fs").addEventListener("click", () => {
+			if (document.fullscreenElement) document.exitFullscreen();
+			else document.documentElement.requestFullscreen().catch(() => {});
+		});
+	</script>
 
 	<script type="module">
 		window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
@@ -148,7 +166,7 @@
 			//
 			// Kein 3-Finger. Feintuning per URL: ?sens=rot:1,zoom:1,pan:1
 
-			const VERSION = "v20";   // nur intern (Deploy-Check), kein sichtbares Schild mehr
+			const VERSION = "v21";   // nur intern (Deploy-Check), kein sichtbares Schild mehr
 			const renderArea = document.getElementById("potree_render_area");
 			const canvas = viewer.renderer.domElement;
 			const oc = viewer.orbitControls;

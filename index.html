@@ -48,6 +48,17 @@
 		.act:active { background: #3a4a5e; }
 		.empty, .error { max-width: 1100px; margin: 40px auto; color: #9aa0a6; text-align: center; }
 		.error { color: #e0736b; }
+		.act.share { flex: 0 0 auto; padding: 8px 12px; }
+		/* Teilen-Dialog */
+		#share { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none;
+			align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+		#share.open { display: flex; }
+		.share-box { background: #24282e; border: 1px solid #3a4450; border-radius: 14px;
+			padding: 20px; width: 320px; max-width: 100%; text-align: center; }
+		.share-box h3 { font-size: 17px; margin-bottom: 14px; }
+		#qr { background: #fff; padding: 10px; border-radius: 8px; }
+		.share-url { color: #9aa0a6; font-size: 12px; word-break: break-all; margin: 12px 0; }
+		.share-actions { display: flex; gap: 8px; }
 	</style>
 </head>
 <body>
@@ -59,6 +70,19 @@
 	<div id="grid" class="grid"></div>
 	<div id="status"></div>
 
+	<div id="share">
+		<div class="share-box">
+			<h3 id="share-title"></h3>
+			<div id="qr"></div>
+			<div class="share-url" id="share-url"></div>
+			<div class="share-actions">
+				<button class="act primary" id="share-copy">Link kopieren</button>
+				<button class="act" id="share-close">Schließen</button>
+			</div>
+		</div>
+	</div>
+
+	<script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
 	<script>
 		const POINT_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="#8fb8e0" stroke-width="1.5">
 			<circle cx="6" cy="8" r="1.3"/><circle cx="11" cy="6" r="1.3"/><circle cx="17" cy="9" r="1.3"/>
@@ -66,6 +90,10 @@
 			<circle cx="5" cy="17" r="1.3"/><circle cx="11" cy="18" r="1.3"/><circle cx="16" cy="19" r="1.3"/></svg>`;
 
 		const R2_BASE = "https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev";
+
+		function shareUrl(pc) {
+			return new URL("view.html?p=" + encodeURIComponent(pc.name), location.href).href;
+		}
 
 		function card(pc) {
 			const div = document.createElement("div");
@@ -75,6 +103,7 @@
 			if (pc.model) {
 				actions += '<a class="act" href="model.html?p=' + enc + '">3D-Modell</a>';
 			}
+			actions += '<button class="act share" type="button">Teilen</button>';
 			const thumbHtml = pc.thumb
 				? '<div class="thumb" style="background-image:url(\'' + R2_BASE + '/' + enc + '/thumb.jpg\');background-size:cover;background-position:center"></div>'
 				: '<div class="thumb">' + POINT_ICON + '</div>';
@@ -87,8 +116,32 @@
 				'</div>';
 			div.querySelector(".title").textContent = pc.title || pc.name;
 			div.querySelector(".desc").textContent = pc.description || "";
+			div.querySelector(".share").addEventListener("click", () => openShare(pc));
 			return div;
 		}
+
+		// --- Teilen-Dialog ---
+		const shareEl = document.getElementById("share");
+		let currentUrl = "";
+		function openShare(pc) {
+			currentUrl = shareUrl(pc);
+			document.getElementById("share-title").textContent = pc.title || pc.name;
+			document.getElementById("share-url").textContent = currentUrl;
+			const qr = document.getElementById("qr");
+			qr.innerHTML = "";
+			if (window.QRCode) {
+				new QRCode(qr, { text: currentUrl, width: 220, height: 220 });
+			}
+			shareEl.classList.add("open");
+		}
+		document.getElementById("share-close").addEventListener("click", () => shareEl.classList.remove("open"));
+		shareEl.addEventListener("click", (e) => { if (e.target === shareEl) shareEl.classList.remove("open"); });
+		document.getElementById("share-copy").addEventListener("click", () => {
+			const btn = document.getElementById("share-copy");
+			navigator.clipboard.writeText(currentUrl)
+				.then(() => { btn.textContent = "Kopiert!"; setTimeout(() => btn.textContent = "Link kopieren", 1500); })
+				.catch(() => { btn.textContent = "Kopieren nicht möglich"; });
+		});
 
 		fetch("pointclouds.json?nocache=" + Date.now())
 			.then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
