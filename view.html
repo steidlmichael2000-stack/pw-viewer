@@ -29,14 +29,14 @@
 		#pw-loc:active { background: #31465f; }
 		#pw-loc svg { width: 24px; height: 24px; }
 
-		/* Projekt-Titel: Kasten unten links, rechts neben dem Standort-Knopf */
+		/* Projekt-Titel: oben mittig, zwischen Einstellungs- und Zurueck-Knopf */
 		#potree_description {
 			position: absolute !important;
-			left: 64px !important; bottom: 12px !important;
-			top: auto !important; right: auto !important; width: auto !important;
-			transform: none !important;
-			max-width: calc(100vw - 132px) !important;
-			text-align: left !important;
+			left: 50% !important; top: 12px !important;
+			bottom: auto !important; right: auto !important; width: auto !important;
+			transform: translateX(-50%) !important;
+			max-width: calc(100vw - 124px) !important;
+			text-align: center !important;
 			background: rgba(36,40,46,0.85); color: #fff !important;
 			font-family: -apple-system,"Segoe UI",Roboto,sans-serif !important;
 			font-weight: 600 !important; font-size: 14px !important;
@@ -53,6 +53,17 @@
 			box-shadow: 0 2px 8px rgba(0,0,0,0.35);
 		}
 		#pw-gear:active { background: #31465f; }
+
+		/* Zurueck-Knopf oben rechts (nur Pfeil, Stil wie Zahnrad) */
+		#pw-back {
+			position: absolute; right: 10px; top: 10px; z-index: 10000;
+			width: 46px; height: 46px; border: none; border-radius: 12px;
+			background: rgba(36,40,46,0.85); color: #fff; text-decoration: none;
+			display: flex; align-items: center; justify-content: center;
+			box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+		}
+		#pw-back:active { background: #31465f; }
+		#pw-back svg { width: 24px; height: 24px; }
 
 		/* Einstellungs-Panel */
 		#pw-panel {
@@ -107,7 +118,10 @@
 		<div id="potree_sidebar_container"></div>
 	</div>
 
-	<a href="index.html" style="position:absolute;right:8px;top:8px;z-index:10000;background:rgba(0,0,0,0.6);color:#fff;font:14px sans-serif;text-decoration:none;padding:8px 12px;border-radius:6px;">← Übersicht</a>
+	<a href="index.html" id="pw-back" aria-label="Übersicht" title="Übersicht">
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+			<path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+	</a>
 
 	<a id="pw-loc" target="_blank" rel="noopener" aria-label="Auf Google Maps zeigen" title="Auf Google Maps zeigen">
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
