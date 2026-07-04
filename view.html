@@ -17,12 +17,25 @@
 		/* Potrees VR-Knopf und Hamburger ausblenden (nicht gebraucht) */
 		#VRButton, .potree_menu_toggle { display: none !important; }
 
-		/* Projekt-Titel: Kasten unten links (einheitlich mit den Knoepfen) */
+		/* Standort-Knopf unten links (oeffnet Google Maps an der Aufnahmestelle) */
+		#pw-loc {
+			position: absolute; left: 12px; bottom: 12px; z-index: 10000;
+			width: 44px; height: 44px; border: none; border-radius: 8px; cursor: pointer;
+			background: rgba(36,40,46,0.85); color: #fff;
+			display: none; align-items: center; justify-content: center;
+			box-shadow: 0 2px 8px rgba(0,0,0,0.35); text-decoration: none;
+		}
+		#pw-loc.ready { display: flex; }
+		#pw-loc:active { background: #31465f; }
+		#pw-loc svg { width: 24px; height: 24px; }
+
+		/* Projekt-Titel: Kasten unten links, rechts neben dem Standort-Knopf */
 		#potree_description {
 			position: absolute !important;
-			left: 12px !important; bottom: 12px !important;
+			left: 64px !important; bottom: 12px !important;
 			top: auto !important; right: auto !important; width: auto !important;
-			max-width: calc(100vw - 80px) !important;
+			transform: none !important;
+			max-width: calc(100vw - 132px) !important;
 			text-align: left !important;
 			background: rgba(36,40,46,0.85); color: #fff !important;
 			font-family: -apple-system,"Segoe UI",Roboto,sans-serif !important;
@@ -96,6 +109,11 @@
 
 	<a href="index.html" style="position:absolute;right:8px;top:8px;z-index:10000;background:rgba(0,0,0,0.6);color:#fff;font:14px sans-serif;text-decoration:none;padding:8px 12px;border-radius:6px;">← Übersicht</a>
 
+	<a id="pw-loc" target="_blank" rel="noopener" aria-label="Auf Google Maps zeigen" title="Auf Google Maps zeigen">
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+			<path d="M12 21s-6-5.686-6-10a6 6 0 1 1 12 0c0 4.314-6 10-6 10z"/><circle cx="12" cy="11" r="2.5"/></svg>
+	</a>
+
 	<button id="fs" aria-label="Vollbild" title="Vollbild">
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 			<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
@@ -151,6 +169,50 @@
 				viewer.setDescription(entry ? entry.title : "");
 			})
 			.catch(() => {});
+
+		// --- Standort-Knopf: Mitte der Punktwolke -> Google Maps ---
+		// metadata.json enthaelt keine CRS-Angabe; WebODM-Aufnahmen in dieser
+		// Region liegen in UTM Zone 32N (EPSG:32632). Zone hier bei Bedarf aendern.
+		const UTM_ZONE = 32, UTM_NORTH = true;
+		function utmToLatLon(easting, northing, zone, north) {
+			const a = 6378137.0, f = 1 / 298.257223563;
+			const e2 = f * (2 - f), ep2 = e2 / (1 - e2), k0 = 0.9996;
+			const x = easting - 500000.0;
+			const y = north ? northing : northing - 10000000.0;
+			const M = y / k0;
+			const mu = M / (a * (1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256));
+			const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+			const fp = mu + (3 * e1 / 2 - 27 * e1 ** 3 / 32) * Math.sin(2 * mu)
+				+ (21 * e1 ** 2 / 16 - 55 * e1 ** 4 / 32) * Math.sin(4 * mu)
+				+ (151 * e1 ** 3 / 96) * Math.sin(6 * mu)
+				+ (1097 * e1 ** 4 / 512) * Math.sin(8 * mu);
+			const C1 = ep2 * Math.cos(fp) ** 2, T1 = Math.tan(fp) ** 2;
+			const R1 = a * (1 - e2) / Math.pow(1 - e2 * Math.sin(fp) ** 2, 1.5);
+			const N1 = a / Math.sqrt(1 - e2 * Math.sin(fp) ** 2);
+			const D = x / (N1 * k0);
+			const lat = fp - (N1 * Math.tan(fp) / R1) * (D * D / 2
+				- (5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * ep2) * D ** 4 / 24
+				+ (61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 3 * C1 * C1 - 252 * ep2) * D ** 6 / 720);
+			const lonRad = (D - (1 + 2 * T1 + C1) * D ** 3 / 6
+				+ (5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * ep2 + 24 * T1 * T1) * D ** 5 / 120) / Math.cos(fp);
+			const lon0 = (zone * 6 - 183) * Math.PI / 180;
+			return [lat * 180 / Math.PI, (lon0 + lonRad) * 180 / Math.PI];
+		}
+		fetch(POINTCLOUD_URL + "?nocache=" + Date.now())
+			.then(r => r.ok ? r.json() : null)
+			.then(m => {
+				const bb = m && m.boundingBox;
+				if (!bb || !bb.min || !bb.max) return;
+				const cx = (bb.min[0] + bb.max[0]) / 2, cy = (bb.min[1] + bb.max[1]) / 2;
+				if (!isFinite(cx) || !isFinite(cy)) return;
+				const [lat, lon] = utmToLatLon(cx, cy, UTM_ZONE, UTM_NORTH);
+				if (!isFinite(lat) || !isFinite(lon)) return;
+				const loc = document.getElementById("pw-loc");
+				loc.href = `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`;
+				loc.classList.add("ready");
+			})
+			.catch(() => {});
+
 		viewer.setPointBudget(3_000_000);
 
 		Potree.loadPointCloud(POINTCLOUD_URL, displayName, e => {
