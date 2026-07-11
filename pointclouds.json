@@ -41,13 +41,6 @@
                             "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
                             "model":  true,
                             "thumb":  true
-                        },
-                        {
-                            "name":  "st-johannis_gollhofen",
-                            "title":  "St-Johannis Gollhofen",
-                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
-                            "model":  true,
-                            "thumb":  true
                         }
                     ]
 }
