@@ -45,7 +45,9 @@
                         {
                             "name":  "st__johannis_gollhofen",
                             "title":  "St. Johannis Gollhofen",
-                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)"
+                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
+                            "model":  true,
+                            "thumb":  true
                         }
                     ]
 }
