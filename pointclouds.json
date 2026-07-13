@@ -29,15 +29,15 @@
                             "thumb":  true
                         },
                         {
-                            "name":  "pfarrhof_gollhofen",
-                            "title":  "Pfarrhof Gollhofen",
+                            "name":  "st__johannis_gollhofen",
+                            "title":  "St. Johannis Gollhofen",
                             "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
                             "model":  true,
                             "thumb":  true
                         },
                         {
-                            "name":  "st__johannis_gollhofen",
-                            "title":  "St. Johannis Gollhofen",
+                            "name":  "pfarrhof_gollhofen",
+                            "title":  "Pfarrhof Gollhofen",
                             "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
                             "model":  true,
                             "thumb":  true
