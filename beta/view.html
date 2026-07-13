@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+	<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+	<meta http-equiv="Pragma" content="no-cache">
+	<meta http-equiv="Expires" content="0">
+	<title>Punktwolken-Viewer</title>
+
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+	<link rel="stylesheet" type="text/css" href="../build/potree/potree.css">
+	<link rel="stylesheet" type="text/css" href="../libs/jquery-ui/jquery-ui.min.css">
+	<link rel="stylesheet" type="text/css" href="../libs/openlayers3/ol.css">
+	<link rel="stylesheet" type="text/css" href="../libs/spectrum/spectrum.css">
+	<link rel="stylesheet" type="text/css" href="../libs/jstree/themes/mixed/style.css">
+	<style>
+		/* ---- Beta-Bedienoberfläche: Blau, abgerundet, Backdrop-Blur ---- */
+		:root {
+			--ctrl-bg: rgba(15,20,23,.82);
+			--ctrl-solid: rgba(15,20,23,.96);
+			--ctrl-border: rgba(255,255,255,.09);
+			--ctrl-shadow: 0 6px 20px rgba(0,0,0,.45);
+			--accent: #4a90d9;
+			--text: #eef1f4;
+			--text-dim: #93a0ab;
+			--font: 'Lexend',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+			--font-head: 'Fredoka','Lexend',sans-serif;
+		}
+		body { font-family: var(--font); }
+
+		/* Potrees VR-Knopf und Hamburger ausblenden (nicht gebraucht) */
+		#VRButton, .potree_menu_toggle { display: none !important; }
+
+		/* Buttons/Inputs erben Schriftart nicht automatisch vom body (Browser-Voreinstellung) */
+		button, input { font-family: var(--font); }
+
+		/* Gemeinsamer Stil für die schwebenden Steuer-Knöpfe */
+		#pw-gear, #pw-back, #fs, #pw-loc {
+			position: absolute; z-index: 10000;
+			width: 46px; height: 46px; border: 1px solid var(--ctrl-border);
+			border-radius: 13px; cursor: pointer; text-decoration: none;
+			background: var(--ctrl-bg); color: var(--text);
+			display: flex; align-items: center; justify-content: center;
+			box-shadow: var(--ctrl-shadow);
+			-webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px);
+			transition: background .13s, border-color .13s, transform .08s;
+		}
+		#pw-gear:hover, #pw-back:hover, #fs:hover, #pw-loc:hover { border-color: var(--accent); }
+		#pw-gear:active, #pw-back:active, #fs:active, #pw-loc:active {
+			background: #31465f; border-color: var(--accent); transform: scale(.95);
+		}
+		#pw-gear svg, #pw-back svg, #fs svg, #pw-loc svg { width: 23px; height: 23px; }
+
+		#pw-gear { left: 12px; top: 12px; font-size: 22px; line-height: 1; }
+		#pw-back { right: 12px; top: 12px; }
+		#fs      { right: 12px; bottom: 12px; }
+		#pw-loc  { left: 12px; bottom: 12px; display: none; }
+		#pw-loc.ready { display: flex; }
+
+		/* Projekt-Titel: oben mittig, zwischen Zahnrad und Zurück-Knopf */
+		#potree_description {
+			position: absolute !important;
+			left: 50% !important; top: 12px !important;
+			bottom: auto !important; right: auto !important; width: auto !important;
+			transform: translateX(-50%) !important;
+			max-width: calc(100vw - 130px) !important;
+			text-align: center !important;
+			background: var(--ctrl-bg) !important; color: var(--text) !important;
+			font-family: var(--font-head) !important; font-weight: 600 !important; font-size: 14px !important;
+			padding: 11px 15px; border: 1px solid var(--ctrl-border); border-radius: 12px;
+			text-shadow: none; box-shadow: var(--ctrl-shadow);
+			-webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px);
+			white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+		}
+
+		/* Einstellungs-Panel */
+		#pw-panel {
+			position: absolute; left: 12px; top: 68px; z-index: 10000;
+			width: 246px; max-width: calc(100vw - 24px);
+			background: var(--ctrl-solid); color: var(--text);
+			border: 1px solid var(--ctrl-border); border-radius: 16px; padding: 15px 16px 17px;
+			font-family: var(--font); font-size: 14px;
+			box-shadow: var(--ctrl-shadow);
+			-webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+			display: none;
+		}
+		#pw-panel.open { display: block; }
+		#pw-panel h3 {
+			font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em;
+			color: var(--text-dim); margin: 0 0 9px; font-weight: 700;
+		}
+		#pw-panel h3:not(:first-child) { margin-top: 17px; }
+		.pw-bg-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+		.pw-bg-btn {
+			padding: 10px 6px; border: 1px solid var(--ctrl-border); border-radius: 10px;
+			background: rgba(255,255,255,.04); color: var(--text); font-size: 13px; cursor: pointer;
+			transition: background .12s, border-color .12s;
+		}
+		.pw-bg-btn:hover { background: rgba(255,255,255,.08); }
+		.pw-bg-btn.active { border-color: var(--accent); background: #31465f; color: #fff; }
+		#pw-zoom { width: 100%; accent-color: var(--accent); margin-top: 3px; }
+		#pw-zoomval { float: right; color: #6ab0f3; font-weight: 700; }
+	</style>
+</head>
+
+<body>
+	<script src="../libs/jquery/jquery-3.1.1.min.js"></script>
+	<script src="../libs/spectrum/spectrum.js"></script>
+	<script src="../libs/jquery-ui/jquery-ui.min.js"></script>
+	<script src="../libs/other/BinaryHeap.js"></script>
+	<script src="../libs/tween/tween.min.js"></script>
+	<script src="../libs/d3/d3.js"></script>
+	<script src="../libs/proj4/proj4.js"></script>
+	<script src="../libs/openlayers3/ol.js"></script>
+	<script src="../libs/i18next/i18next.js"></script>
+	<script src="../libs/jstree/jstree.js"></script>
+	<script src="../build/potree/potree.js"></script>
+	<script src="../libs/plasio/js/laslaz.js"></script>
+
+	<div class="potree_container" style="position: absolute; width: 100%; height: 100%; left: 0px; top: 0px;">
+		<div id="potree_render_area" style="background-image: url('../build/potree/resources/images/background.jpg');"></div>
+		<div id="potree_sidebar_container"></div>
+	</div>
+
+	<a href="index.html" id="pw-back" aria-label="Übersicht" title="Übersicht">
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+			<path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+	</a>
+
+	<a id="pw-loc" target="_blank" rel="noopener" aria-label="Auf Google Maps zeigen" title="Auf Google Maps zeigen">
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+			<path d="M12 21s-6-5.686-6-10a6 6 0 1 1 12 0c0 4.314-6 10-6 10z"/><circle cx="12" cy="11" r="2.5"/></svg>
+	</a>
+
+	<button id="fs" aria-label="Vollbild" title="Vollbild">
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+			<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+	</button>
+	<script>
+		(function () {
+			const fsBtn = document.getElementById("fs");
+			const EXP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>';
+			const CMP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3M16 3v3a2 2 0 0 0 2 2h3M8 21v-3a2 2 0 0 0-2-2H3M16 21v-3a2 2 0 0 1 2-2h3"/></svg>';
+			fsBtn.addEventListener("click", () => {
+				if (document.fullscreenElement) document.exitFullscreen();
+				else document.documentElement.requestFullscreen().catch(() => {});
+			});
+			document.addEventListener("fullscreenchange", () => {
+				fsBtn.innerHTML = document.fullscreenElement ? CMP : EXP;
+			});
+		})();
+	</script>
+
+	<script type="module">
+		window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
+
+		viewer.setEDLEnabled(false);   // EDL vorsichtshalber aus (Android-Stabilitaet)
+		viewer.setFOV(60);
+		viewer.setPointBudget(1_000_000);
+		viewer.loadSettingsFromURL();
+		viewer.setBackground(localStorage.getItem("pw_bg") || "gradient");
+		viewer.loadGUI(() => {
+			viewer.setLanguage('de');
+			$("#menu_tools").next().show();
+			$("#menu_clipping").next().show();
+			$("#potree_sidebar_container").hide();
+			// Hamburger blendet Sidebar wirklich ein/aus (Potree schiebt sonst nur)
+			$(".potree_menu_toggle").on("click", () => {
+				$("#potree_sidebar_container").toggle();
+			});
+		});
+
+		const R2_BASE = "https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev";
+		const DEFAULT_PC = "geckenheim";
+		const params = new URLSearchParams(window.location.search);
+		const rawName = params.get("p") || DEFAULT_PC;
+		const pcName = /^[a-z0-9_-]+$/.test(rawName) ? rawName : DEFAULT_PC;
+		const POINTCLOUD_URL = `${R2_BASE}/${pcName}/metadata.json`;
+		const displayName = pcName.charAt(0).toUpperCase() + pcName.slice(1);
+		// Titel oben mittig = Projektname aus der Uebersicht (pointclouds.json).
+		// Bis geladen: leer (nicht der haessliche technische Name).
+		viewer.setDescription("");
+		fetch("../pointclouds.json?nocache=" + Date.now())
+			.then(r => r.ok ? r.json() : null)
+			.then(d => {
+				const entry = d && (d.pointclouds || []).find(x => x.name === pcName);
+				viewer.setDescription(entry ? entry.title : "");
+			})
+			.catch(() => {});
+
+		// --- Standort-Knopf: Mitte der Punktwolke -> Google Maps ---
+		// metadata.json enthaelt keine CRS-Angabe; WebODM-Aufnahmen in dieser
+		// Region liegen in UTM Zone 32N (EPSG:32632). Zone hier bei Bedarf aendern.
+		const UTM_ZONE = 32, UTM_NORTH = true;
+		function utmToLatLon(easting, northing, zone, north) {
+			const a = 6378137.0, f = 1 / 298.257223563;
+			const e2 = f * (2 - f), ep2 = e2 / (1 - e2), k0 = 0.9996;
+			const x = easting - 500000.0;
+			const y = north ? northing : northing - 10000000.0;
+			const M = y / k0;
+			const mu = M / (a * (1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256));
+			const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+			const fp = mu + (3 * e1 / 2 - 27 * e1 ** 3 / 32) * Math.sin(2 * mu)
+				+ (21 * e1 ** 2 / 16 - 55 * e1 ** 4 / 32) * Math.sin(4 * mu)
+				+ (151 * e1 ** 3 / 96) * Math.sin(6 * mu)
+				+ (1097 * e1 ** 4 / 512) * Math.sin(8 * mu);
+			const C1 = ep2 * Math.cos(fp) ** 2, T1 = Math.tan(fp) ** 2;
+			const R1 = a * (1 - e2) / Math.pow(1 - e2 * Math.sin(fp) ** 2, 1.5);
+			const N1 = a / Math.sqrt(1 - e2 * Math.sin(fp) ** 2);
+			const D = x / (N1 * k0);
+			const lat = fp - (N1 * Math.tan(fp) / R1) * (D * D / 2
+				- (5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * ep2) * D ** 4 / 24
+				+ (61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 3 * C1 * C1 - 252 * ep2) * D ** 6 / 720);
+			const lonRad = (D - (1 + 2 * T1 + C1) * D ** 3 / 6
+				+ (5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * ep2 + 24 * T1 * T1) * D ** 5 / 120) / Math.cos(fp);
+			const lon0 = (zone * 6 - 183) * Math.PI / 180;
+			return [lat * 180 / Math.PI, (lon0 + lonRad) * 180 / Math.PI];
+		}
+		fetch(POINTCLOUD_URL + "?nocache=" + Date.now())
+			.then(r => r.ok ? r.json() : null)
+			.then(m => {
+				const bb = m && m.boundingBox;
+				if (!bb || !bb.min || !bb.max) return;
+				const cx = (bb.min[0] + bb.max[0]) / 2, cy = (bb.min[1] + bb.max[1]) / 2;
+				if (!isFinite(cx) || !isFinite(cy)) return;
+				const [lat, lon] = utmToLatLon(cx, cy, UTM_ZONE, UTM_NORTH);
+				if (!isFinite(lat) || !isFinite(lon)) return;
+				const loc = document.getElementById("pw-loc");
+				loc.href = `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`;
+				loc.classList.add("ready");
+			})
+			.catch(() => {});
+
+		viewer.setPointBudget(3_000_000);
+
+		Potree.loadPointCloud(POINTCLOUD_URL, displayName, e => {
+			let scene = viewer.scene;
+			let pointcloud = e.pointcloud;
+			let material = pointcloud.material;
+			material.size = 2;
+			material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+			material.shape = Potree.PointShape.SQUARE;
+
+			scene.addPointCloud(pointcloud);
+			viewer.fitToScreen();
+
+			// ============================================================
+			// Touch-Steuerung "Objekt-Modus" (Trimble/Leica-Stil)
+			// ============================================================
+			// Wir fangen Touch-Events vor Potree ab und fuettern Potrees
+			// EIGENE, erprobte OrbitControls mit Delta-Werten. Potrees
+			// update() rechnet die Kamera daraus sicher -> KEIN Absturz,
+			// KEINE selbstgebaute Kamera-Mathematik.
+			//
+			//   1 Finger                    = drehen / neigen (orbit)
+			//   2 Finger auseinander/zu     = zoomen
+			//   2 Finger zusammen schieben  = verschieben (pan)
+			//
+			// Kein 3-Finger. Feintuning per URL: ?sens=rot:1,zoom:1,pan:1
+
+			const VERSION = "v23";   // nur intern (Deploy-Check), kein sichtbares Schild mehr
+			const renderArea = document.getElementById("potree_render_area");
+			const canvas = viewer.renderer.domElement;
+			const oc = viewer.orbitControls;
+
+			const SENS = { rot: 1.0, zoom: 4.0, pan: 1.0 };
+			const sensParam = params.get("sens");
+			if (sensParam) {
+				for (const part of sensParam.split(",")) {
+					const [k, v] = part.split(":");
+					const n = parseFloat(v);
+					if (k in SENS && isFinite(n)) SENS[k] = n;
+				}
+			}
+			// Gespeicherten Zoom-Wert laden (falls vorhanden)
+			const savedZoom = parseFloat(localStorage.getItem("pw_zoom2"));
+			if (isFinite(savedZoom)) SENS.zoom = savedZoom;
+
+			// --- Einstellungen: Zahnrad-Knopf (oben links) + Panel ---
+			const gear = document.createElement("button");
+			gear.id = "pw-gear";
+			gear.type = "button";
+			gear.innerHTML = "&#9881;"; // Zahnrad-Symbol
+			gear.setAttribute("aria-label", "Einstellungen");
+			document.body.appendChild(gear);
+
+			const panel = document.createElement("div");
+			panel.id = "pw-panel";
+			panel.innerHTML =
+				'<h3>Hintergrund</h3>' +
+				'<div class="pw-bg-row">' +
+					'<button class="pw-bg-btn" data-bg="skybox">Himmel</button>' +
+					'<button class="pw-bg-btn" data-bg="gradient">Verlauf</button>' +
+					'<button class="pw-bg-btn" data-bg="black">Schwarz</button>' +
+					'<button class="pw-bg-btn" data-bg="white">Weiß</button>' +
+				'</div>' +
+				'<h3>Ansicht</h3>' +
+				'<div class="pw-bg-row">' +
+					'<button class="pw-bg-btn pw-proj-btn" data-proj="perspective">Perspektive</button>' +
+					'<button class="pw-bg-btn pw-proj-btn" data-proj="ortho">Orthografisch</button>' +
+				'</div>' +
+				'<h3>Zoom-Tempo <span id="pw-zoomval"></span></h3>' +
+				'<input id="pw-zoom" type="range" min="0.3" max="6" step="0.1">';
+			document.body.appendChild(panel);
+
+			gear.addEventListener("click", () => panel.classList.toggle("open"));
+
+			// Hintergrund-Auswahl
+			const bgBtns = panel.querySelectorAll("[data-bg]");
+			function setActiveBg(bg) {
+				bgBtns.forEach(b => b.classList.toggle("active", b.dataset.bg === bg));
+			}
+			setActiveBg(localStorage.getItem("pw_bg") || "gradient");
+			bgBtns.forEach(b => b.addEventListener("click", () => {
+				viewer.setBackground(b.dataset.bg);
+				localStorage.setItem("pw_bg", b.dataset.bg);
+				setActiveBg(b.dataset.bg);
+			}));
+
+			// Ansicht: Perspektive / Orthografisch (Potree-eigene Umschaltung)
+			const projBtns = panel.querySelectorAll("[data-proj]");
+			function setProjection(mode) {
+				viewer.setCameraMode(mode === "ortho" ? Potree.CameraMode.ORTHOGRAPHIC : Potree.CameraMode.PERSPECTIVE);
+				localStorage.setItem("pw_proj", mode);
+				projBtns.forEach(b => b.classList.toggle("active", b.dataset.proj === mode));
+			}
+			projBtns.forEach(b => b.addEventListener("click", () => setProjection(b.dataset.proj)));
+			setProjection(localStorage.getItem("pw_proj") || "perspective");
+
+			// Zoom-Tempo-Regler (im Panel)
+			const zoomSlider = panel.querySelector("#pw-zoom");
+			const zoomVal = panel.querySelector("#pw-zoomval");
+			zoomSlider.value = String(SENS.zoom);
+			function updZoomLabel() { zoomVal.textContent = SENS.zoom.toFixed(1) + "x"; }
+			updZoomLabel();
+			zoomSlider.addEventListener("input", () => {
+				SENS.zoom = parseFloat(zoomSlider.value);
+				localStorage.setItem("pw_zoom2", String(SENS.zoom));
+				updZoomLabel();
+			});
+
+			// Gesten auf Knopf/Panel nicht an den Viewer weiterreichen
+			[gear, panel].forEach(el =>
+				["touchstart", "touchmove", "touchend", "wheel", "pointerdown"].forEach(evt =>
+					el.addEventListener(evt, e => e.stopPropagation())));
+
+			const ROT_SPEED = 5; // entspricht Potrees interner rotationSpeed
+			function canvasXY(t) {
+				const r = canvas.getBoundingClientRect();
+				return { x: t.clientX - r.left, y: t.clientY - r.top };
+			}
+			const last = new Map();
+			let lastCount = 0;
+			function remember(ev) {
+				last.clear();
+				for (const t of ev.touches) last.set(t.identifier, canvasXY(t));
+				lastCount = ev.touches.length;
+			}
+			// Radius nie unter 0.3 m -> verhindert Durchfliegen/Degeneration
+			function clampRadius() {
+				const view = viewer.scene.view;
+				if (view.radius + oc.radiusDelta < 0.3) oc.radiusDelta = 0.3 - view.radius;
+			}
+
+			const capOpts = { capture: true, passive: false };
+
+			renderArea.addEventListener('touchstart', (ev) => {
+				ev.preventDefault();
+				ev.stopImmediatePropagation();
+				remember(ev);
+			}, capOpts);
+
+			renderArea.addEventListener('touchmove', (ev) => {
+				ev.preventDefault();
+				ev.stopImmediatePropagation();
+				if (ev.touches.length !== lastCount) { remember(ev); return; }
+
+				const w = renderArea.clientWidth, h = renderArea.clientHeight;
+
+				if (ev.touches.length === 1) {
+					// 1 Finger -> drehen / neigen (Potrees Links-Drag-Verhalten)
+					const t = ev.touches[0];
+					const prev = last.get(t.identifier);
+					const cur = canvasXY(t);
+					if (prev) {
+						oc.yawDelta   += (cur.x - prev.x) / w * ROT_SPEED * SENS.rot;
+						oc.pitchDelta += (cur.y - prev.y) / h * ROT_SPEED * SENS.rot;
+					}
+					last.set(t.identifier, cur);
+				} else if (ev.touches.length >= 2) {
+					// 2 Finger -> zoomen (Abstand) + verschieben (Mittelpunkt)
+					const view = viewer.scene.view;
+					const t0 = ev.touches[0], t1 = ev.touches[1];
+					const c0 = canvasXY(t0), c1 = canvasXY(t1);
+					const p0 = last.get(t0.identifier), p1 = last.get(t1.identifier);
+					if (p0 && p1) {
+						const pdist = Math.hypot(p0.x - p1.x, p0.y - p1.y);
+						const cdist = Math.hypot(c0.x - c1.x, c0.y - c1.y);
+
+						// Zoom (Potree-Standardformel ueber radiusDelta)
+						if (pdist > 10 && cdist > 1) {
+							const delta = Math.pow(cdist / pdist, SENS.zoom);
+							const resolved = view.radius + oc.radiusDelta;
+							oc.radiusDelta = resolved / delta - resolved;
+							clampRadius();
+						}
+
+						// Pan (Verschiebung des Finger-Mittelpunkts)
+						const prevMx = (p0.x + p1.x) / 2, prevMy = (p0.y + p1.y) / 2;
+						const curMx = (c0.x + c1.x) / 2, curMy = (c0.y + c1.y) / 2;
+						oc.panDelta.x += (curMx - prevMx) / w * SENS.pan;
+						oc.panDelta.y += (curMy - prevMy) / h * SENS.pan;
+
+						last.set(t0.identifier, c0);
+						last.set(t1.identifier, c1);
+					}
+				}
+			}, capOpts);
+
+			const endH = (ev) => {
+				if (ev.cancelable) ev.preventDefault();
+				ev.stopImmediatePropagation();
+				if (ev.touches.length === 0) { last.clear(); lastCount = 0; }
+				else remember(ev);
+			};
+			renderArea.addEventListener('touchend', endH, capOpts);
+			renderArea.addEventListener('touchcancel', endH, capOpts);
+
+			// Desktop: Mausrad -> zoomen (wie Potree-Scroll)
+			renderArea.addEventListener('wheel', (ev) => {
+				ev.preventDefault();
+				const view = viewer.scene.view;
+				const resolved = view.radius + oc.radiusDelta;
+				const dir = ev.deltaY < 0 ? 1 : -1;
+				oc.radiusDelta += -dir * resolved * 0.1 * SENS.zoom;
+				clampRadius();
+			}, { passive: false, capture: true });
+		});
+	</script>
+</body>
+</html>
