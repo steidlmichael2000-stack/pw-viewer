@@ -249,9 +249,16 @@
 		.share-actions .act:hover { background: rgba(74,144,217,.22); }
 
 		@media (max-width: 560px) {
-			body { padding: 22px 14px 56px; }
-			header { gap: 12px; }
-			h1 { font-size: 25px; }
+			body { padding: 20px 14px 56px; }
+			header { gap: 12px; padding-bottom: 16px; margin-bottom: 14px; }
+			header .logo { height: 44px; }
+			.eyebrow { font-size: 9.5px; letter-spacing: .05em; margin-bottom: 3px; }
+			h1 { font-size: 24px; }
+			.sub { display: none; }               /* Untertitel auf dem Handy ausblenden -> weniger überladen */
+			.count-pill { display: none; }        /* Zähler auf dem Handy weglassen -> Titel bekommt volle Breite */
+			/* nur noch die Icons, vertikal zentriert -> flacher Kopf */
+			.header-right { flex-direction: row; align-items: center; gap: 8px; align-self: center; }
+			.header-tools { margin-bottom: 0; }
 			.grid { gap: 16px; grid-template-columns: 1fr; }
 		}
 	</style>
