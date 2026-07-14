@@ -418,7 +418,8 @@
 		const POINTS_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="7" r="1.5"/><circle cx="10.5" cy="4.8" r="1.5"/><circle cx="16.5" cy="7.2" r="1.5"/><circle cx="7" cy="12.2" r="1.5"/><circle cx="13" cy="11" r="1.5"/><circle cx="18.6" cy="13" r="1.5"/><circle cx="5.2" cy="17.3" r="1.5"/><circle cx="11" cy="18.4" r="1.5"/><circle cx="17.2" cy="18" r="1.5"/></svg>';
 
 		function shareUrl(pc) {
-			return new URL(VIEW_BASE + "view.html?p=" + encodeURIComponent(pc.name), location.href).href;
+			const page = (pc.pointcloud !== false) ? "view.html?p=" : "model.html?p=";
+			return new URL(VIEW_BASE + page + encodeURIComponent(pc.name), location.href).href;
 		}
 
 		// Punktzahl & Datum: aus pointclouds.json (falls gesetzt), sonst live aus
@@ -464,12 +465,15 @@
 			const div = document.createElement("div");
 			div.className = "card";
 			const enc = encodeURIComponent(pc.name);
+			const hasPc = pc.pointcloud !== false;
 			const pcBtn = '<a class="vbtn ghost" href="' + VIEW_BASE + 'view.html?p=' + enc + '">' + POINTS_ICON + 'Punktwolke</a>';
+			const mdBtn = '<a class="vbtn primary" href="' + VIEW_BASE + 'model.html?p=' + enc + '">' + CUBE_ICON + '3D-Modell</a>';
 			let btns;
-			if (pc.model) {
+			if (pc.model && hasPc) {
 				// getauscht: links 3D-Modell (hervorgehoben), rechts Punktwolke
-				const mdBtn = '<a class="vbtn primary" href="' + VIEW_BASE + 'model.html?p=' + enc + '">' + CUBE_ICON + '3D-Modell</a>';
 				btns = mdBtn + pcBtn;
+			} else if (pc.model) {
+				btns = mdBtn;
 			} else {
 				btns = pcBtn.replace("vbtn ghost", "vbtn primary");
 			}

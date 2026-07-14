@@ -107,9 +107,13 @@
 			const div = document.createElement("div");
 			div.className = "card";
 			const enc = encodeURIComponent(pc.name);
-			let actions = '<a class="act primary" href="view.html?p=' + enc + '">Punktwolke</a>';
+			const hasPc = pc.pointcloud !== false;
+			let actions = '';
+			if (hasPc) {
+				actions += '<a class="act primary" href="view.html?p=' + enc + '">Punktwolke</a>';
+			}
 			if (pc.model) {
-				actions += '<a class="act" href="model.html?p=' + enc + '">3D-Modell</a>';
+				actions += '<a class="' + (hasPc ? 'act' : 'act primary') + '" href="model.html?p=' + enc + '">3D-Modell</a>';
 			}
 			actions += '<button class="act share" type="button" aria-label="Teilen" title="Teilen">' + SHARE_ICON + '</button>';
 			const thumbHtml = pc.thumb
