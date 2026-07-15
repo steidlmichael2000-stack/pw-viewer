@@ -154,7 +154,10 @@
 			.then(r => r.ok ? r.json() : null)
 			.then(d => {
 				const e = d && (d.pointclouds || []).find(x => x.name === pcName);
-				if (e) document.getElementById("title").textContent = e.title;
+				if (e) {
+					document.getElementById("title").textContent = e.title;
+					if (e.utmX != null && e.utmY != null) setMaps(Number(e.utmX), Number(e.utmY));
+				}
 			}).catch(() => {});
 
 		// --- Standort-Knopf: Mitte der Punktwolke -> Google Maps ---
@@ -185,18 +188,23 @@
 			const lon0 = (zone * 6 - 183) * Math.PI / 180;
 			return [lat * 180 / Math.PI, (lon0 + lonRad) * 180 / Math.PI];
 		}
+		let mapsSet = false;
+		function setMaps(cx, cy) {
+			if (mapsSet || !isFinite(cx) || !isFinite(cy)) return;
+			const [lat, lon] = utmToLatLon(cx, cy, UTM_ZONE, UTM_NORTH);
+			if (!isFinite(lat) || !isFinite(lon)) return;
+			const loc = document.getElementById("pw-loc");
+			loc.href = `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`;
+			loc.classList.add("ready");
+			mapsSet = true;
+		}
 		fetch(`${R2_BASE}/${pcName}/metadata.json?nocache=` + Date.now())
 			.then(r => r.ok ? r.json() : null)
 			.then(m => {
 				const bb = m && m.boundingBox;
 				if (!bb || !bb.min || !bb.max) return;
 				const cx = (bb.min[0] + bb.max[0]) / 2, cy = (bb.min[1] + bb.max[1]) / 2;
-				if (!isFinite(cx) || !isFinite(cy)) return;
-				const [lat, lon] = utmToLatLon(cx, cy, UTM_ZONE, UTM_NORTH);
-				if (!isFinite(lat) || !isFinite(lon)) return;
-				const loc = document.getElementById("pw-loc");
-				loc.href = `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`;
-				loc.classList.add("ready");
+				setMaps(cx, cy);
 			})
 			.catch(() => {});
 
