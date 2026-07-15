@@ -430,6 +430,12 @@
 			if (n >= 1e4) return Math.round(n / 1e3).toLocaleString("de-DE") + " Tsd. Punkte";
 			return n.toLocaleString("de-DE") + " Punkte";
 		}
+		function fmtTris(n) {
+			if (n == null || !isFinite(n)) return null;
+			if (n >= 1e6) return (n / 1e6).toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " Mio Dreiecke";
+			if (n >= 1e4) return Math.round(n / 1e3).toLocaleString("de-DE") + " Tsd. Dreiecke";
+			return n.toLocaleString("de-DE") + " Dreiecke";
+		}
 		function fmtDate(d) {
 			if (!d) return null;
 			const dt = new Date(d);
@@ -448,6 +454,13 @@
 					}
 				} catch (e) {}
 			}
+			// Modell-only-Projekte haben keine metadata.json -> Datum aus model.glb (Upload-Zeit)
+			if (!dateRaw && pc.model) {
+				try {
+					const r = await fetch(R2_BASE + "/" + encodeURIComponent(pc.name) + "/model.glb?nocache=" + Date.now(), { method: "HEAD" });
+					if (r.ok) dateRaw = r.headers.get("last-modified");
+				} catch (e) {}
+			}
 			pc._points = points;
 			pc._dateRaw = dateRaw;
 			const dt = dateRaw ? new Date(dateRaw) : null;
@@ -457,6 +470,7 @@
 		function metaHtml(pc) {
 			const parts = [];
 			const p = fmtPoints(pc._points); if (p) parts.push('<span class="pts">' + p + "</span>");
+			const t = fmtTris(pc.tris); if (t) parts.push('<span class="pts">' + t + "</span>");
 			const d = fmtDate(pc._dateRaw); if (d) parts.push("<span>" + d + "</span>");
 			return parts.join('<span class="msep">·</span>');
 		}
