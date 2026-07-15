@@ -48,6 +48,14 @@
                             "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
                             "model":  true,
                             "thumb":  true
+                        },
+                        {
+                            "name":  "st__johannis",
+                            "title":  "St. Johannis",
+                            "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
+                            "pointcloud":  false,
+                            "model":  true,
+                            "thumb":  true
                         }
                     ]
 }
