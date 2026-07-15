@@ -55,7 +55,10 @@
                             "description":  "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
                             "pointcloud":  false,
                             "model":  true,
-                            "thumb":  true
+                            "thumb":  true,
+                            "tris":  3351418,
+                            "utmX":  586057.3801965714,
+                            "utmY":  5491265.944282532
                         }
                     ]
 }
