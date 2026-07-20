@@ -535,9 +535,8 @@
 		// --- Sortierung + Suche ---
 		let entries = [];
 		let filterText = "";
-		let sortMode = localStorage.getItem("pw_sort_mode") || "name";
-		let sortDir = parseInt(localStorage.getItem("pw_sort_dir"), 10);
-		if (sortDir !== 1 && sortDir !== -1) sortDir = (sortMode === "date") ? -1 : 1;
+		let sortMode = "date";   // beim Laden IMMER nach Datum
+		let sortDir = -1;        // neueste zuerst; Umstellen nur ueber das Menue (Sitzung)
 
 		const sortToggle = document.getElementById("sortToggle");
 		const sortMenu = document.getElementById("sortMenu");
@@ -576,8 +575,6 @@
 		sortOpts.forEach(o => o.addEventListener("click", () => {
 			sortMode = o.dataset.mode;
 			sortDir = parseInt(o.dataset.dir, 10);
-			localStorage.setItem("pw_sort_mode", sortMode);
-			localStorage.setItem("pw_sort_dir", String(sortDir));
 			render();
 			closeSortMenu();
 		}));
