@@ -8,94 +8,102 @@
 	<meta http-equiv="Expires" content="0">
 	<title>Punktwolken-Viewer</title>
 
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
 	<link rel="stylesheet" type="text/css" href="build/potree/potree.css">
 	<link rel="stylesheet" type="text/css" href="libs/jquery-ui/jquery-ui.min.css">
 	<link rel="stylesheet" type="text/css" href="libs/openlayers3/ol.css">
 	<link rel="stylesheet" type="text/css" href="libs/spectrum/spectrum.css">
 	<link rel="stylesheet" type="text/css" href="libs/jstree/themes/mixed/style.css">
 	<style>
+		/* ---- Beta-Bedienoberfläche: Blau, abgerundet, Backdrop-Blur ---- */
+		:root {
+			--ctrl-bg: rgba(15,20,23,.82);
+			--ctrl-solid: rgba(15,20,23,.96);
+			--ctrl-border: rgba(255,255,255,.09);
+			--ctrl-shadow: 0 6px 20px rgba(0,0,0,.45);
+			--accent: #4a90d9;
+			--text: #eef1f4;
+			--text-dim: #93a0ab;
+			--font: 'Lexend',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+			--font-head: 'Fredoka','Lexend',sans-serif;
+		}
+		body { font-family: var(--font); }
+
 		/* Potrees VR-Knopf und Hamburger ausblenden (nicht gebraucht) */
 		#VRButton, .potree_menu_toggle { display: none !important; }
 
-		/* Standort-Knopf unten links (oeffnet Google Maps an der Aufnahmestelle) */
-		#pw-loc {
-			position: absolute; left: 12px; bottom: 12px; z-index: 10000;
-			width: 44px; height: 44px; border: none; border-radius: 8px; cursor: pointer;
-			background: rgba(36,40,46,0.85); color: #fff;
-			display: none; align-items: center; justify-content: center;
-			box-shadow: 0 2px 8px rgba(0,0,0,0.35); text-decoration: none;
-		}
-		#pw-loc.ready { display: flex; }
-		#pw-loc:active { background: #31465f; }
-		#pw-loc svg { width: 24px; height: 24px; }
+		/* Buttons/Inputs erben Schriftart nicht automatisch vom body (Browser-Voreinstellung) */
+		button, input { font-family: var(--font); }
 
-		/* Projekt-Titel: oben mittig, zwischen Einstellungs- und Zurueck-Knopf */
+		/* Gemeinsamer Stil für die schwebenden Steuer-Knöpfe */
+		#pw-gear, #pw-back, #fs, #pw-loc {
+			position: absolute; z-index: 10000;
+			width: 46px; height: 46px; border: 1px solid var(--ctrl-border);
+			border-radius: 13px; cursor: pointer; text-decoration: none;
+			background: var(--ctrl-bg); color: var(--text);
+			display: flex; align-items: center; justify-content: center;
+			box-shadow: var(--ctrl-shadow);
+			-webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px);
+			transition: background .13s, border-color .13s, transform .08s;
+		}
+		#pw-gear:hover, #pw-back:hover, #fs:hover, #pw-loc:hover { border-color: var(--accent); }
+		#pw-gear:active, #pw-back:active, #fs:active, #pw-loc:active {
+			background: #31465f; border-color: var(--accent); transform: scale(.95);
+		}
+		#pw-gear svg, #pw-back svg, #fs svg, #pw-loc svg { width: 23px; height: 23px; }
+
+		#pw-gear { left: 12px; top: 12px; font-size: 22px; line-height: 1; }
+		#pw-back { right: 12px; top: 12px; }
+		#fs      { right: 12px; bottom: 12px; }
+		#pw-loc  { left: 12px; bottom: 12px; display: none; }
+		#pw-loc.ready { display: flex; }
+
+		/* Projekt-Titel: oben mittig, zwischen Zahnrad und Zurück-Knopf */
 		#potree_description {
 			position: absolute !important;
 			left: 50% !important; top: 12px !important;
 			bottom: auto !important; right: auto !important; width: auto !important;
 			transform: translateX(-50%) !important;
-			max-width: calc(100vw - 124px) !important;
+			max-width: calc(100vw - 130px) !important;
 			text-align: center !important;
-			background: rgba(36,40,46,0.85); color: #fff !important;
-			font-family: -apple-system,"Segoe UI",Roboto,sans-serif !important;
-			font-weight: 600 !important; font-size: 14px !important;
-			padding: 8px 12px; border-radius: 8px; text-shadow: none;
+			background: var(--ctrl-bg) !important; color: var(--text) !important;
+			font-family: var(--font-head) !important; font-weight: 600 !important; font-size: 14px !important;
+			padding: 11px 15px; border: 1px solid var(--ctrl-border); border-radius: 12px;
+			text-shadow: none; box-shadow: var(--ctrl-shadow);
+			-webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px);
 			white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 		}
 
-		/* Einstellungen: Zahnrad-Knopf oben links */
-		#pw-gear {
-			position: absolute; left: 10px; top: 10px; z-index: 10000;
-			width: 46px; height: 46px; border: none; border-radius: 12px;
-			background: rgba(36,40,46,0.85); color: #fff; font-size: 22px; line-height: 1;
-			display: flex; align-items: center; justify-content: center; cursor: pointer;
-			box-shadow: 0 2px 8px rgba(0,0,0,0.35);
-		}
-		#pw-gear:active { background: #31465f; }
-
-		/* Zurueck-Knopf oben rechts (nur Pfeil, Stil wie Zahnrad) */
-		#pw-back {
-			position: absolute; right: 10px; top: 10px; z-index: 10000;
-			width: 46px; height: 46px; border: none; border-radius: 12px;
-			background: rgba(36,40,46,0.85); color: #fff; text-decoration: none;
-			display: flex; align-items: center; justify-content: center;
-			box-shadow: 0 2px 8px rgba(0,0,0,0.35);
-		}
-		#pw-back:active { background: #31465f; }
-		#pw-back svg { width: 24px; height: 24px; }
-
 		/* Einstellungs-Panel */
 		#pw-panel {
-			position: absolute; left: 10px; top: 66px; z-index: 10000;
-			width: 240px; max-width: calc(100vw - 20px);
-			background: rgba(36,40,46,0.94); color: #e8e8e8;
-			border: 1px solid #3a4450; border-radius: 14px; padding: 14px 16px 16px;
-			font-family: -apple-system,"Segoe UI",Roboto,sans-serif; font-size: 14px;
-			box-shadow: 0 6px 20px rgba(0,0,0,0.4); display: none;
+			position: absolute; left: 12px; top: 68px; z-index: 10000;
+			width: 246px; max-width: calc(100vw - 24px);
+			background: var(--ctrl-solid); color: var(--text);
+			border: 1px solid var(--ctrl-border); border-radius: 16px; padding: 15px 16px 17px;
+			font-family: var(--font); font-size: 14px;
+			box-shadow: var(--ctrl-shadow);
+			-webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+			display: none;
 		}
 		#pw-panel.open { display: block; }
 		#pw-panel h3 {
-			font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
-			color: #9aa0a6; margin: 0 0 8px; font-weight: 600;
+			font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em;
+			color: var(--text-dim); margin: 0 0 9px; font-weight: 700;
 		}
-		#pw-panel h3:not(:first-child) { margin-top: 16px; }
-		.pw-bg-row { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+		#pw-panel h3:not(:first-child) { margin-top: 17px; }
+		.pw-bg-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 		.pw-bg-btn {
-			padding: 9px 6px; border: 1px solid #3a4450; border-radius: 9px;
-			background: #2b3038; color: #e8e8e8; font-size: 13px; cursor: pointer;
+			padding: 10px 6px; border: 1px solid var(--ctrl-border); border-radius: 10px;
+			background: rgba(255,255,255,.04); color: var(--text); font-size: 13px; cursor: pointer;
 			transition: background .12s, border-color .12s;
 		}
-		.pw-bg-btn.active { border-color: #4a90d9; background: #31465f; color: #fff; }
-		#pw-zoom { width: 100%; accent-color: #4a90d9; margin-top: 2px; }
-		#pw-zoomval { float: right; color: #6ab0f3; font-weight: 600; }
-		#fs {
-			position: absolute; right: 12px; bottom: 12px; z-index: 10000;
-			width: 44px; height: 44px; border: none; border-radius: 10px; cursor: pointer;
-			background: rgba(36,40,46,0.85); color: #fff;
-			display: flex; align-items: center; justify-content: center;
-		}
-		#fs svg { width: 22px; height: 22px; }
+		.pw-bg-btn:hover { background: rgba(255,255,255,.08); }
+		.pw-bg-btn.active { border-color: var(--accent); background: #31465f; color: #fff; }
+		#pw-zoom { width: 100%; accent-color: var(--accent); margin-top: 3px; }
+		#pw-zoomval { float: right; color: #6ab0f3; font-weight: 700; }
 	</style>
 </head>
 
