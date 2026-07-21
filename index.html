@@ -8,6 +8,7 @@
 	<meta http-equiv="Pragma" content="no-cache">
 	<meta http-equiv="Expires" content="0">
 	<title>3D-Aufnahmen – Übersicht</title>
+	<link rel="icon" href="logo.svg" type="image/svg+xml">
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -253,6 +254,17 @@
 			.header-right { flex-direction: row; align-items: center; gap: 8px; align-self: center; }
 			.header-tools { margin-bottom: 0; }
 			.grid { gap: 16px; grid-template-columns: 1fr; }
+		}
+
+		/* Barrierefreiheit: Wer "Bewegung reduzieren" im System aktiviert hat,
+		   bekommt keine dekorativen Animationen (Skelett-Puls, Karten-Anheben). */
+		@media (prefers-reduced-motion: reduce) {
+			*, *::before, *::after {
+				animation-duration: .001ms !important;
+				animation-iteration-count: 1 !important;
+				transition-duration: .001ms !important;
+			}
+			.card:hover { transform: none; }
 		}
 	</style>
 </head>
