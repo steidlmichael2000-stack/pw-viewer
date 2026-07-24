@@ -106,6 +106,19 @@
 		.pw-bg-btn.active { border-color: var(--accent); background: #31465f; color: #fff; }
 		#pw-zoom { width: 100%; accent-color: var(--accent); margin-top: 3px; }
 		#pw-zoomval { float: right; color: #6ab0f3; font-weight: 700; }
+			.pw-m-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+			.pw-m-clear { width: 100%; margin-top: 8px; }
+			.pw-m-btn.active { border-color: var(--accent); background: #31465f; color: #fff; }
+			#pw-measure-done {
+				position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+				z-index: 10000; display: none; align-items: center; gap: 7px;
+				padding: 12px 18px; border-radius: 13px; cursor: pointer;
+				font: 600 14px var(--font); border: 1px solid var(--accent);
+				background: rgba(74,144,217,.92); color: #fff; box-shadow: var(--ctrl-shadow);
+				-webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px);
+			}
+			#pw-measure-done.show { display: inline-flex; }
+			#pw-measure-done:active { transform: translateX(-50%) scale(.96); }
 	</style>
 </head>
 
@@ -305,7 +318,14 @@
 					'<button class="pw-bg-btn pw-proj-btn" data-proj="perspective">Perspektive</button>' +
 					'<button class="pw-bg-btn pw-proj-btn" data-proj="ortho">Orthografisch</button>' +
 				'</div>' +
-				'<h3>Zoom-Tempo <span id="pw-zoomval"></span></h3>' +
+				'<h3>Messen</h3>' +
+					'<div class="pw-m-row">' +
+						'<button class="pw-bg-btn pw-m-btn" data-measure="distanz">Distanz</button>' +
+						'<button class="pw-bg-btn pw-m-btn" data-measure="flaeche">Fläche</button>' +
+						'<button class="pw-bg-btn pw-m-btn" data-measure="hoehe">Höhe</button>' +
+					'</div>' +
+					'<button class="pw-bg-btn pw-m-clear" id="pw-m-clear">Messungen löschen</button>' +
+					'<h3>Zoom-Tempo <span id="pw-zoomval"></span></h3>' +
 				'<input id="pw-zoom" type="range" min="0.3" max="6" step="0.1">';
 			document.body.appendChild(panel);
 
@@ -345,7 +365,42 @@
 				updZoomLabel();
 			});
 
-			// Gesten auf Knopf/Panel nicht an den Viewer weiterreichen
+			// --- Messen (nutzt Potrees eingebaute Messwerkzeuge) ---
+				let pwMeasuring = false;
+				const MEASURE_OPTS = {
+					distanz: { showDistances: true, showArea: false, closed: false, name: "Distanz" },
+					flaeche: { showDistances: true, showArea: true, closed: true, name: "Flaeche" },
+					hoehe:   { showDistances: false, showHeight: true, showArea: false, closed: false, maxMarkers: 2, name: "Hoehe" }
+				};
+				const measureDone = document.createElement("button");
+				measureDone.id = "pw-measure-done";
+				measureDone.type = "button";
+				measureDone.textContent = "✓ Messung beenden";
+				document.body.appendChild(measureDone);
+				const measureBtns = panel.querySelectorAll("[data-measure]");
+				function startMeasure(kind) {
+					const o = MEASURE_OPTS[kind];
+					if (!o) return;
+					endMeasure();                 // evtl. laufende Messung erst sauber beenden
+					viewer.measuringTool.startInsertion(o);
+					pwMeasuring = true;
+					measureBtns.forEach(b => b.classList.toggle("active", b.dataset.measure === kind));
+					panel.classList.remove("open");
+					measureDone.classList.add("show");
+				}
+				function endMeasure() {
+					try { viewer.dispatchEvent({ type: "cancel_insertions" }); } catch (e) {}
+					pwMeasuring = false;
+					measureBtns.forEach(b => b.classList.remove("active"));
+					measureDone.classList.remove("show");
+				}
+				measureBtns.forEach(b => b.addEventListener("click", () => startMeasure(b.dataset.measure)));
+				panel.querySelector("#pw-m-clear").addEventListener("click", () => { viewer.scene.removeAllMeasurements(); endMeasure(); });
+				measureDone.addEventListener("click", endMeasure);
+				["touchstart", "touchend", "pointerdown", "click", "wheel"].forEach(evt =>
+					measureDone.addEventListener(evt, e => e.stopPropagation()));
+
+				// Gesten auf Knopf/Panel nicht an den Viewer weiterreichen
 			[gear, panel].forEach(el =>
 				["touchstart", "touchmove", "touchend", "wheel", "pointerdown"].forEach(evt =>
 					el.addEventListener(evt, e => e.stopPropagation())));
@@ -371,12 +426,14 @@
 			const capOpts = { capture: true, passive: false };
 
 			renderArea.addEventListener('touchstart', (ev) => {
+				if (pwMeasuring) return;   // beim Messen: Tap zu Potree durchlassen
 				ev.preventDefault();
 				ev.stopImmediatePropagation();
 				remember(ev);
 			}, capOpts);
 
 			renderArea.addEventListener('touchmove', (ev) => {
+				if (pwMeasuring) return;   // beim Messen: Bewegung zu Potree durchlassen
 				ev.preventDefault();
 				ev.stopImmediatePropagation();
 				if (ev.touches.length !== lastCount) { remember(ev); return; }
@@ -424,6 +481,7 @@
 			}, capOpts);
 
 			const endH = (ev) => {
+				if (pwMeasuring) return;   // beim Messen: Tap-Ende zu Potree durchlassen
 				if (ev.cancelable) ev.preventDefault();
 				ev.stopImmediatePropagation();
 				if (ev.touches.length === 0) { last.clear(); lastCount = 0; }

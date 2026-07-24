@@ -92,6 +92,27 @@
 			transition: background .12s, border-color .12s; }
 		.pw-bg-btn:hover { background: rgba(255,255,255,.08); }
 		.pw-bg-btn.active { border-color: var(--accent); background: #31465f; color: #fff; }
+		.pw-m-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+		#pw-mlabels { position: absolute; inset: 0; z-index: 6; pointer-events: none; overflow: hidden; }
+		.pw-mlabel {
+			position: absolute; transform: translate(-50%, -50%); pointer-events: none;
+			padding: 2px 7px; border-radius: 8px; white-space: nowrap;
+			font: 600 12px var(--font); color: var(--text);
+			background: rgba(15,20,23,.85); border: 1px solid var(--ctrl-border);
+			-webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+		}
+		.pw-mlabel.strong { background: rgba(74,144,217,.92); border-color: var(--accent); color: #fff; }
+		#pw-measure-done {
+			position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+			z-index: 21; display: none; align-items: center; gap: 7px;
+			padding: 12px 18px; border-radius: 13px; cursor: pointer;
+			font: 600 14px var(--font); border: 1px solid var(--accent);
+			background: rgba(74,144,217,.92); color: #fff; box-shadow: var(--ctrl-shadow);
+			-webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px);
+		}
+		#pw-measure-done.show { display: inline-flex; }
+		#pw-measure-done:active { transform: translateX(-50%) scale(.96); }
+		.pw-m-btn.active { border-color: var(--accent); background: #31465f; color: #fff; }
 	</style>
 	<script type="importmap">
 	{
@@ -291,6 +312,161 @@
 		}
 		projBtns.forEach(b => b.addEventListener("click", () => setProjection(b.dataset.proj)));
 
+			// ============================================================
+			//  Messen im 3D-Modell (Distanz / Flaeche / Hoehe)
+			//  Klick/Tippen setzt Punkte auf der Oberflaeche (Raycast).
+			//  Modelle liegen in echten Metern -> Ergebnisse in m bzw. m².
+			// ============================================================
+			let measureModelRoot = null;   // wird nach dem Laden gesetzt
+			let measureRadius = 1;
+			const mRaycaster = new THREE.Raycaster();
+			const mGroup = new THREE.Group(); mGroup.renderOrder = 999; scene.add(mGroup);
+			const mSphereGeo = new THREE.SphereGeometry(1, 16, 12);
+			const mSphereMat = new THREE.MeshBasicMaterial({ color: 0xffd23f, depthTest: false });
+			const mLineMat = new THREE.LineBasicMaterial({ color: 0xffd23f, depthTest: false });
+
+			// UI dynamisch anlegen (kein statisches HTML noetig)
+			panel.insertAdjacentHTML("beforeend",
+				'<h3 style="margin-top:16px">Messen</h3>' +
+				'<div class="pw-m-row">' +
+					'<button class="pw-bg-btn pw-m-btn" data-measure="distanz">Distanz</button>' +
+					'<button class="pw-bg-btn pw-m-btn" data-measure="flaeche">Fl&auml;che</button>' +
+					'<button class="pw-bg-btn pw-m-btn" data-measure="hoehe">H&ouml;he</button>' +
+				'</div>' +
+				'<button class="pw-bg-btn pw-m-clear" id="pw-m-clear" style="width:100%;margin-top:8px">Messungen l&ouml;schen</button>');
+			const mLabelLayer = document.createElement("div"); mLabelLayer.id = "pw-mlabels";
+			document.body.appendChild(mLabelLayer);
+			const mDoneBtn = document.createElement("button");
+			mDoneBtn.id = "pw-measure-done"; mDoneBtn.type = "button"; mDoneBtn.textContent = "✓ Messung beenden";
+			document.body.appendChild(mDoneBtn);
+			const mMeasureBtns = panel.querySelectorAll("[data-measure]");
+
+			const measurements = [];   // {mode, points:[Vector3], group, labels:[{pos,el}]}
+			let mCurrent = null, mActiveMode = null;
+
+			const mFmtLen = (d) => d >= 1000 ? (d / 1000).toFixed(2) + " km" : (d < 1 ? (d * 100).toFixed(0) + " cm" : d.toFixed(2) + " m");
+			const mFmtArea = (a) => a >= 1e6 ? (a / 1e6).toFixed(2) + " km²" : a.toFixed(1) + " m²";
+
+			function mAddLabel(m, pos, text, strong) {
+				const el = document.createElement("div");
+				el.className = "pw-mlabel" + (strong ? " strong" : "");
+				el.textContent = text;
+				mLabelLayer.appendChild(el);
+				m.labels.push({ pos: pos.clone(), el });
+			}
+			function mPolygonArea(pts) {   // Newell-Methode (3D-Polygon)
+				const n = pts.length; if (n < 3) return 0;
+				const nrm = new THREE.Vector3();
+				for (let i = 0; i < n; i++) {
+					const a = pts[i], b = pts[(i + 1) % n];
+					nrm.x += (a.y - b.y) * (a.z + b.z);
+					nrm.y += (a.z - b.z) * (a.x + b.x);
+					nrm.z += (a.x - b.x) * (a.y + b.y);
+				}
+				return nrm.length() / 2;
+			}
+			function mRedraw(m) {
+				while (m.group.children.length) m.group.remove(m.group.children[0]);
+				m.labels.forEach(l => l.el.remove()); m.labels = [];
+				const pts = m.points, r = measureRadius * 0.006;
+				for (const p of pts) {
+					const s = new THREE.Mesh(mSphereGeo, mSphereMat);
+					s.position.copy(p); s.scale.setScalar(r); s.renderOrder = 999;
+					m.group.add(s);
+				}
+				if (m.mode === "distanz" && pts.length >= 2) {
+					const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mLineMat);
+					line.renderOrder = 999; m.group.add(line);
+					let total = 0;
+					for (let i = 0; i + 1 < pts.length; i++) {
+						const d = pts[i].distanceTo(pts[i + 1]); total += d;
+						mAddLabel(m, pts[i].clone().lerp(pts[i + 1], 0.5), mFmtLen(d));
+					}
+					if (pts.length > 2) mAddLabel(m, pts[pts.length - 1], "Σ " + mFmtLen(total), true);
+				} else if (m.mode === "flaeche") {
+					if (pts.length >= 2) {
+						const loop = pts.length >= 3 ? pts.concat([pts[0]]) : pts;
+						const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(loop), mLineMat);
+						line.renderOrder = 999; m.group.add(line);
+					}
+					if (pts.length >= 3) {
+						const c = new THREE.Vector3(); pts.forEach(p => c.add(p)); c.multiplyScalar(1 / pts.length);
+						mAddLabel(m, c, mFmtArea(mPolygonArea(pts)), true);
+					}
+				} else if (m.mode === "hoehe" && pts.length >= 2) {
+					const p0 = pts[0], p1 = pts[1];
+					const lo = p0.z <= p1.z ? p0 : p1, hi = p0.z <= p1.z ? p1 : p0;
+					const corner = new THREE.Vector3(lo.x, lo.y, hi.z);
+					const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([lo, corner, hi]), mLineMat);
+					line.renderOrder = 999; m.group.add(line);
+					mAddLabel(m, lo.clone().lerp(corner, 0.5), "Δh " + mFmtLen(Math.abs(p1.z - p0.z)), true);
+				}
+			}
+			function mUpdateLabels() {
+				const w = innerWidth, h = innerHeight;
+				for (const m of measurements) for (const l of m.labels) {
+					const v = l.pos.clone().project(activeCamera);
+					if (v.z > 1 || v.x < -1.15 || v.x > 1.15 || v.y < -1.15 || v.y > 1.15) { l.el.style.display = "none"; continue; }
+					l.el.style.display = "block";
+					l.el.style.left = ((v.x * 0.5 + 0.5) * w) + "px";
+					l.el.style.top = ((-v.y * 0.5 + 0.5) * h) + "px";
+				}
+			}
+			function mSetMode(kind) {
+				mFinalize();
+				mActiveMode = kind;
+				mCurrent = { mode: kind, points: [], group: new THREE.Group(), labels: [] };
+				mGroup.add(mCurrent.group); measurements.push(mCurrent);
+				mMeasureBtns.forEach(b => b.classList.toggle("active", b.dataset.measure === kind));
+				panel.classList.remove("open");
+				mDoneBtn.classList.add("show");
+				canvas.style.cursor = "crosshair";
+			}
+			function mFinalize() {
+				if (mCurrent) {
+					const need = mCurrent.mode === "flaeche" ? 3 : 2;
+					if (mCurrent.points.length < need) {   // zu wenig Punkte -> verwerfen
+						mCurrent.labels.forEach(l => l.el.remove());
+						mGroup.remove(mCurrent.group);
+						const i = measurements.indexOf(mCurrent); if (i >= 0) measurements.splice(i, 1);
+					}
+				}
+				mCurrent = null; mActiveMode = null;
+				mMeasureBtns.forEach(b => b.classList.remove("active"));
+				mDoneBtn.classList.remove("show");
+				canvas.style.cursor = "";
+			}
+			function mClearAll() {
+				mFinalize();
+				measurements.forEach(m => { m.labels.forEach(l => l.el.remove()); mGroup.remove(m.group); });
+				measurements.length = 0;
+			}
+			function mAddPoint(p) {
+				if (!mCurrent) return;
+				mCurrent.points.push(p.clone());
+				mRedraw(mCurrent);
+				if (mCurrent.mode === "hoehe" && mCurrent.points.length >= 2) mFinalize();
+			}
+			// Tippen/Klicken (ohne Ziehen) setzt einen Punkt; Ziehen bleibt Drehen (OrbitControls)
+			let mDown = null, mMoved = false;
+			canvas.addEventListener("pointerdown", (e) => { mDown = { x: e.clientX, y: e.clientY, t: performance.now() }; mMoved = false; });
+			canvas.addEventListener("pointermove", (e) => { if (mDown && Math.hypot(e.clientX - mDown.x, e.clientY - mDown.y) > 6) mMoved = true; });
+			canvas.addEventListener("pointerup", (e) => {
+				const tap = mDown && !mMoved && (performance.now() - mDown.t) < 500;
+				mDown = null;
+				if (!tap || !mActiveMode || !measureModelRoot) return;
+				const rect = canvas.getBoundingClientRect();
+				const ndc = new THREE.Vector2(
+					((e.clientX - rect.left) / rect.width) * 2 - 1,
+					-((e.clientY - rect.top) / rect.height) * 2 + 1);
+				mRaycaster.setFromCamera(ndc, activeCamera);
+				const hits = mRaycaster.intersectObject(measureModelRoot, true);
+				if (hits.length) mAddPoint(hits[0].point);
+			});
+			mMeasureBtns.forEach(b => b.addEventListener("click", () => mSetMode(b.dataset.measure)));
+			document.getElementById("pw-m-clear").addEventListener("click", mClearAll);
+			mDoneBtn.addEventListener("click", mFinalize);
+
 		const draco = new DRACOLoader();
 		draco.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/");
 		const loader = new GLTFLoader();
@@ -307,6 +483,7 @@
 			model.position.sub(center);
 
 			const radius = Math.max(size.x, size.y, size.z);
+			measureModelRoot = model; measureRadius = radius;   // fuer die Messfunktion
 			controls.target.set(0, 0, 0);
 			camera.position.set(radius * 0.6, -radius * 0.9, radius * 0.7);
 			camera.near = radius / 1000;
@@ -354,6 +531,7 @@
 			requestAnimationFrame(animate);
 			controls.update();
 			renderer.render(scene, activeCamera);
+			mUpdateLabels();
 		})();
 	</script>
 </body>
