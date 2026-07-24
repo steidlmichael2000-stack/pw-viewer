@@ -203,7 +203,7 @@
 			background: var(--accent-bg); border-color: var(--accent); color: var(--accent-txt);
 		}
 		.act.primary:hover { background: var(--accent-bg2); border-color: var(--accent); }
-		.act.share { flex: 0 0 auto; width: 50px; align-self: stretch; padding: 0; }
+		.act.share, .act.loc-btn { flex: 0 0 auto; width: 50px; align-self: stretch; padding: 0; }
 
 		.empty, .error { margin: 60px auto; color: var(--text-dim); text-align: center; font-size: 15px; }
 		.error { color: #e0736b; }
@@ -530,7 +530,7 @@
 			} else {
 				btns = pcBtn.replace("vbtn ghost", "vbtn primary");
 			}
-			const locBtn = pc._maps ? '<a class="act share" href="' + pc._maps + '" target="_blank" rel="noopener" aria-label="Standort" title="Auf Google Maps zeigen">' + LOC_ICON + '</a>' : '';
+			const locBtn = pc._maps ? '<a class="act loc-btn" href="' + pc._maps + '" target="_blank" rel="noopener" aria-label="Standort" title="Auf Google Maps zeigen">' + LOC_ICON + '</a>' : '';
 			const actions = btns + locBtn + '<button class="act share" type="button" aria-label="Teilen" title="Teilen">' + SHARE_ICON + '</button>';
 
 			const thumbStyle = pc.thumb ? ' style="background-image:url(\'' + R2_BASE + '/' + enc + '/thumb.jpg\')"' : '';
