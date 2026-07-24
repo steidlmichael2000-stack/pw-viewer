@@ -35,7 +35,7 @@
 		button, input { font-family: var(--font); }
 
 		/* Gemeinsamer Stil für die schwebenden Steuer-Knöpfe */
-		#back, #fs, #pw-loc, #pw-gear {
+		#back, #fs, #pw-measure, #pw-gear {
 			position: absolute; z-index: 10; width: 46px; height: 46px;
 			border: 1px solid var(--ctrl-border); border-radius: 13px; cursor: pointer; text-decoration: none;
 			background: var(--ctrl-bg); color: var(--text);
@@ -44,17 +44,28 @@
 			-webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px);
 			transition: background .13s, border-color .13s, transform .08s;
 		}
-		#back:hover, #fs:hover, #pw-loc:hover, #pw-gear:hover { border-color: var(--accent); }
-		#back:active, #fs:active, #pw-loc:active, #pw-gear:active {
+		#back:hover, #fs:hover, #pw-measure:hover, #pw-gear:hover { border-color: var(--accent); }
+		#back:active, #fs:active, #pw-measure:active, #pw-gear:active {
 			background: #31465f; border-color: var(--accent); transform: scale(.95);
 		}
-		#back svg, #fs svg, #pw-loc svg { width: 23px; height: 23px; }
+		#back svg, #fs svg, #pw-measure svg { width: 23px; height: 23px; }
 
 		#back    { right: 12px; top: 12px; }
 		#pw-gear { left: 12px; top: 12px; z-index: 20; font-size: 22px; line-height: 1; }
 		#fs      { right: 12px; bottom: 12px; }
-		#pw-loc  { left: 12px; bottom: 12px; display: none; }
-		#pw-loc.ready { display: flex; }
+		#pw-measure { left: 12px; bottom: 12px; }
+		#pw-measure.active { border-color: var(--accent); background: #31465f; }
+		/* Mess-Mini-Menue (ueber dem Messen-Knopf) */
+		#pw-measure-menu {
+			position: absolute; left: 12px; bottom: 70px; z-index: 21;
+			width: 190px; max-width: calc(100vw - 24px); display: none; flex-direction: column; gap: 6px;
+			background: var(--ctrl-solid); border: 1px solid var(--ctrl-border); border-radius: 14px; padding: 10px;
+			box-shadow: var(--ctrl-shadow);
+			-webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+		}
+		#pw-measure-menu.open { display: flex; }
+		#pw-measure-menu .pw-bg-btn { width: 100%; text-align: left; padding: 11px 12px; }
+		#pw-measure-menu hr { border: none; border-top: 1px solid var(--ctrl-border); margin: 2px 0; }
 
 		#title {
 			position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 10;
@@ -130,10 +141,16 @@
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 			<path d="M19 12H5M12 19l-7-7 7-7"/></svg>
 	</a>
-	<a id="pw-loc" target="_blank" rel="noopener" aria-label="Auf Google Maps zeigen" title="Auf Google Maps zeigen">
-		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-			<path d="M12 21s-6-5.686-6-10a6 6 0 1 1 12 0c0 4.314-6 10-6 10z"/><circle cx="12" cy="11" r="2.5"/></svg>
-	</a>
+	<button id="pw-measure" type="button" aria-label="Messen" title="Messen">
+		<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 10H3V8h2v4h2V8h2v4h2V8h2v4h2V8h2v4h2V8h2v8z"/></svg>
+	</button>
+	<div id="pw-measure-menu">
+		<button class="pw-bg-btn pw-m-btn" data-measure="distanz">Distanz</button>
+		<button class="pw-bg-btn pw-m-btn" data-measure="flaeche">Fl&auml;che</button>
+		<button class="pw-bg-btn pw-m-btn" data-measure="hoehe">H&ouml;he</button>
+		<hr>
+		<button class="pw-bg-btn" id="pw-m-clear">Messungen l&ouml;schen</button>
+	</div>
 	<button id="pw-gear" aria-label="Einstellungen">&#9881;</button>
 	<div id="pw-panel">
 		<h3>Hintergrund</h3>
@@ -216,9 +233,11 @@
 			if (mapsSet || !isFinite(cx) || !isFinite(cy)) return;
 			const [lat, lon] = utmToLatLon(cx, cy, UTM_ZONE, UTM_NORTH);
 			if (!isFinite(lat) || !isFinite(lon)) return;
-			const loc = document.getElementById("pw-loc");
-			loc.href = `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`;
-			loc.classList.add("ready");
+			const url = `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`;
+				const pnl = document.getElementById("pw-panel");
+			if (pnl && !document.getElementById("pw-loc-btn")) pnl.insertAdjacentHTML("beforeend", '<h3 style="margin-top:16px">Standort</h3><button class="pw-bg-btn" id="pw-loc-btn" style="width:100%">Auf Google Maps zeigen</button>');
+			const lb = document.getElementById("pw-loc-btn");
+				if (lb) lb.onclick = () => window.open(url, "_blank", "noopener");
 			mapsSet = true;
 		}
 		fetch(`${R2_BASE}/${pcName}/metadata.json?nocache=` + Date.now())
@@ -325,21 +344,15 @@
 			const mSphereMat = new THREE.MeshBasicMaterial({ color: 0xffd23f, depthTest: false });
 			const mLineMat = new THREE.LineBasicMaterial({ color: 0xffd23f, depthTest: false });
 
-			// UI dynamisch anlegen (kein statisches HTML noetig)
-			panel.insertAdjacentHTML("beforeend",
-				'<h3 style="margin-top:16px">Messen</h3>' +
-				'<div class="pw-m-row">' +
-					'<button class="pw-bg-btn pw-m-btn" data-measure="distanz">Distanz</button>' +
-					'<button class="pw-bg-btn pw-m-btn" data-measure="flaeche">Fl&auml;che</button>' +
-					'<button class="pw-bg-btn pw-m-btn" data-measure="hoehe">H&ouml;he</button>' +
-				'</div>' +
-				'<button class="pw-bg-btn pw-m-clear" id="pw-m-clear" style="width:100%;margin-top:8px">Messungen l&ouml;schen</button>');
+			// UI: Messen-Knopf (unten links) + Mini-Menue liegen statisch im HTML.
 			const mLabelLayer = document.createElement("div"); mLabelLayer.id = "pw-mlabels";
 			document.body.appendChild(mLabelLayer);
 			const mDoneBtn = document.createElement("button");
 			mDoneBtn.id = "pw-measure-done"; mDoneBtn.type = "button"; mDoneBtn.textContent = "✓ Messung beenden";
 			document.body.appendChild(mDoneBtn);
-			const mMeasureBtns = panel.querySelectorAll("[data-measure]");
+			const mMeasureBtn = document.getElementById("pw-measure");
+			const mMeasureMenu = document.getElementById("pw-measure-menu");
+			const mMeasureBtns = mMeasureMenu.querySelectorAll("[data-measure]");
 
 			const measurements = [];   // {mode, points:[Vector3], group, labels:[{pos,el}]}
 			let mCurrent = null, mActiveMode = null;
@@ -368,7 +381,7 @@
 			function mRedraw(m) {
 				while (m.group.children.length) m.group.remove(m.group.children[0]);
 				m.labels.forEach(l => l.el.remove()); m.labels = [];
-				const pts = m.points, r = measureRadius * 0.006;
+				const pts = m.points, r = measureRadius * 0.003;
 				for (const p of pts) {
 					const s = new THREE.Mesh(mSphereGeo, mSphereMat);
 					s.position.copy(p); s.scale.setScalar(r); s.renderOrder = 999;
@@ -418,7 +431,8 @@
 				mCurrent = { mode: kind, points: [], group: new THREE.Group(), labels: [] };
 				mGroup.add(mCurrent.group); measurements.push(mCurrent);
 				mMeasureBtns.forEach(b => b.classList.toggle("active", b.dataset.measure === kind));
-				panel.classList.remove("open");
+				mMeasureBtn.classList.add("active");
+				mMeasureMenu.classList.remove("open");
 				mDoneBtn.classList.add("show");
 				canvas.style.cursor = "crosshair";
 			}
@@ -433,6 +447,7 @@
 				}
 				mCurrent = null; mActiveMode = null;
 				mMeasureBtns.forEach(b => b.classList.remove("active"));
+				mMeasureBtn.classList.remove("active");
 				mDoneBtn.classList.remove("show");
 				canvas.style.cursor = "";
 			}
@@ -443,6 +458,10 @@
 			}
 			function mAddPoint(p) {
 				if (!mCurrent) return;
+				// Nahe an einem bereits gesetzten Punkt? -> diesen wieder entfernen (rueckgaengig)
+				const thresh = measureRadius * 0.02;
+				const hitIdx = mCurrent.points.findIndex(q => q.distanceTo(p) < thresh);
+				if (hitIdx >= 0) { mCurrent.points.splice(hitIdx, 1); mRedraw(mCurrent); return; }
 				mCurrent.points.push(p.clone());
 				mRedraw(mCurrent);
 				if (mCurrent.mode === "hoehe" && mCurrent.points.length >= 2) mFinalize();
@@ -463,8 +482,13 @@
 				const hits = mRaycaster.intersectObject(measureModelRoot, true);
 				if (hits.length) mAddPoint(hits[0].point);
 			});
+			// Messen-Knopf (unten links) oeffnet/schliesst das Mini-Menue
+			mMeasureBtn.addEventListener("click", (e) => { e.stopPropagation(); mMeasureMenu.classList.toggle("open"); });
+			document.addEventListener("click", (e) => {
+				if (!mMeasureMenu.contains(e.target) && !mMeasureBtn.contains(e.target)) mMeasureMenu.classList.remove("open");
+			});
 			mMeasureBtns.forEach(b => b.addEventListener("click", () => mSetMode(b.dataset.measure)));
-			document.getElementById("pw-m-clear").addEventListener("click", mClearAll);
+			document.getElementById("pw-m-clear").addEventListener("click", () => { mClearAll(); mMeasureMenu.classList.remove("open"); });
 			mDoneBtn.addEventListener("click", mFinalize);
 
 		const draco = new DRACOLoader();

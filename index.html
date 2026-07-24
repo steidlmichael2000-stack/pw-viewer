@@ -446,15 +446,43 @@
 			if (isNaN(dt.getTime())) return (typeof d === "string" ? d : null); // bereits fertiger String erlaubt
 			return dt.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
 		}
+		// UTM (Zone 32N) -> Lat/Lon fuer den Standort-Knopf auf den Karten
+		function utmToLatLon(easting, northing, zone, north) {
+			const a = 6378137.0, f = 1 / 298.257223563;
+			const e2 = f * (2 - f), ep2 = e2 / (1 - e2), k0 = 0.9996;
+			const x = easting - 500000.0;
+			const y = north ? northing : northing - 10000000.0;
+			const M = y / k0;
+			const mu = M / (a * (1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256));
+			const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+			const fp = mu + (3 * e1 / 2 - 27 * e1 ** 3 / 32) * Math.sin(2 * mu)
+				+ (21 * e1 ** 2 / 16 - 55 * e1 ** 4 / 32) * Math.sin(4 * mu)
+				+ (151 * e1 ** 3 / 96) * Math.sin(6 * mu)
+				+ (1097 * e1 ** 4 / 512) * Math.sin(8 * mu);
+			const C1 = ep2 * Math.cos(fp) ** 2, T1 = Math.tan(fp) ** 2;
+			const R1 = a * (1 - e2) / Math.pow(1 - e2 * Math.sin(fp) ** 2, 1.5);
+			const N1 = a / Math.sqrt(1 - e2 * Math.sin(fp) ** 2);
+			const D = x / (N1 * k0);
+			const lat = fp - (N1 * Math.tan(fp) / R1) * (D * D / 2
+				- (5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * ep2) * D ** 4 / 24
+				+ (61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 3 * C1 * C1 - 252 * ep2) * D ** 6 / 720);
+			const lonRad = (D - (1 + 2 * T1 + C1) * D ** 3 / 6
+				+ (5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * ep2 + 24 * T1 * T1) * D ** 5 / 120) / Math.cos(fp);
+			const lon0 = (zone * 6 - 183) * Math.PI / 180;
+			return [lat * 180 / Math.PI, (lon0 + lonRad) * 180 / Math.PI];
+		}
+		const LOC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.686-6-10a6 6 0 1 1 12 0c0 4.314-6 10-6 10z"/><circle cx="12" cy="11" r="2.5"/></svg>';
 		// Reichert einen Eintrag mit Punktzahl + Datum an (für Anzeige und Sortierung).
 		async function enrich(pc) {
-			let points = pc.points, dateRaw = pc.date;
+			let points = pc.points, dateRaw = pc.date, bbox = null;
 			if (points == null || !dateRaw) {
 				try {
 					const r = await fetch(R2_BASE + "/" + encodeURIComponent(pc.name) + "/metadata.json?nocache=" + Date.now());
 					if (r.ok) {
 						if (!dateRaw) dateRaw = r.headers.get("last-modified");
-						if (points == null) { const j = await r.json(); points = j.points; }
+						const j = await r.json();
+						if (points == null) points = j.points;
+						bbox = j.boundingBox || null;
 					}
 				} catch (e) {}
 			}
@@ -469,6 +497,13 @@
 			pc._dateRaw = dateRaw;
 			const dt = dateRaw ? new Date(dateRaw) : null;
 			pc._dateVal = (dt && !isNaN(dt.getTime())) ? dt.getTime() : 0;
+			// Standort: UTM aus pointclouds.json (Modell-only) oder Bounding-Box-Mitte (Punktwolke)
+			const mx = (pc.utmX != null) ? Number(pc.utmX) : (bbox && bbox.min && bbox.max ? (bbox.min[0] + bbox.max[0]) / 2 : null);
+			const my = (pc.utmY != null) ? Number(pc.utmY) : (bbox && bbox.min && bbox.max ? (bbox.min[1] + bbox.max[1]) / 2 : null);
+			if (mx != null && my != null && isFinite(mx) && isFinite(my)) {
+				const [lat, lon] = utmToLatLon(mx, my, 32, true);
+				if (isFinite(lat) && isFinite(lon)) pc._maps = "https://www.google.com/maps/search/?api=1&query=" + lat.toFixed(6) + "," + lon.toFixed(6);
+			}
 			return pc;
 		}
 		function metaHtml(pc) {
@@ -495,7 +530,8 @@
 			} else {
 				btns = pcBtn.replace("vbtn ghost", "vbtn primary");
 			}
-			const actions = btns + '<button class="act share" type="button" aria-label="Teilen" title="Teilen">' + SHARE_ICON + '</button>';
+			const locBtn = pc._maps ? '<a class="act share" href="' + pc._maps + '" target="_blank" rel="noopener" aria-label="Standort" title="Auf Google Maps zeigen">' + LOC_ICON + '</a>' : '';
+			const actions = btns + locBtn + '<button class="act share" type="button" aria-label="Teilen" title="Teilen">' + SHARE_ICON + '</button>';
 
 			const thumbStyle = pc.thumb ? ' style="background-image:url(\'' + R2_BASE + '/' + enc + '/thumb.jpg\')"' : '';
 
