@@ -458,13 +458,24 @@
 			}
 			function mAddPoint(p) {
 				if (!mCurrent) return;
-				// Nahe an einem bereits gesetzten Punkt? -> diesen wieder entfernen (rueckgaengig)
-				const thresh = measureRadius * 0.02;
-				const hitIdx = mCurrent.points.findIndex(q => q.distanceTo(p) < thresh);
-				if (hitIdx >= 0) { mCurrent.points.splice(hitIdx, 1); mRedraw(mCurrent); return; }
 				mCurrent.points.push(p.clone());
 				mRedraw(mCurrent);
 				if (mCurrent.mode === "hoehe" && mCurrent.points.length >= 2) mFinalize();
+			}
+			// Getippten Punkt (Bildschirm) mit gesetzten Punkten vergleichen -> Index zum Loeschen,
+			// nur wenn man praktisch auf den Punkt tippt (Pixel-Abstand, zoom-unabhaengig).
+			function mHitExistingPoint(sx, sy, rect) {
+				if (!mCurrent || !mCurrent.points.length) return -1;
+				const DEL_PX = 16;
+				let best = -1, bestD = DEL_PX;
+				for (let i = 0; i < mCurrent.points.length; i++) {
+					const v = mCurrent.points[i].clone().project(activeCamera);
+					if (v.z > 1) continue;
+					const px = (v.x * 0.5 + 0.5) * rect.width, py = (-v.y * 0.5 + 0.5) * rect.height;
+					const d = Math.hypot(px - sx, py - sy);
+					if (d < bestD) { bestD = d; best = i; }
+				}
+				return best;
 			}
 			// Tippen/Klicken (ohne Ziehen) setzt einen Punkt; Ziehen bleibt Drehen (OrbitControls)
 			let mDown = null, mMoved = false;
@@ -475,9 +486,12 @@
 				mDown = null;
 				if (!tap || !mActiveMode || !measureModelRoot) return;
 				const rect = canvas.getBoundingClientRect();
-				const ndc = new THREE.Vector2(
-					((e.clientX - rect.left) / rect.width) * 2 - 1,
-					-((e.clientY - rect.top) / rect.height) * 2 + 1);
+				const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+				// Zuerst: praktisch auf einen gesetzten Punkt getippt? -> diesen entfernen
+				const del = mHitExistingPoint(sx, sy, rect);
+				if (del >= 0) { mCurrent.points.splice(del, 1); mRedraw(mCurrent); return; }
+				// sonst neuen Punkt auf der Oberflaeche setzen
+				const ndc = new THREE.Vector2((sx / rect.width) * 2 - 1, -(sy / rect.height) * 2 + 1);
 				mRaycaster.setFromCamera(ndc, activeCamera);
 				const hits = mRaycaster.intersectObject(measureModelRoot, true);
 				if (hits.length) mAddPoint(hits[0].point);
