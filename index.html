@@ -9,6 +9,12 @@
 	<meta http-equiv="Expires" content="0">
 	<title>3D-Aufnahmen – Übersicht</title>
 	<link rel="icon" href="logo.svg" type="image/svg+xml">
+	<link rel="manifest" href="manifest.webmanifest">
+	<link rel="apple-touch-icon" href="icon-192.png">
+	<meta name="theme-color" content="#0a0d0f">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+	<meta name="apple-mobile-web-app-title" content="PW-Viewer">
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -697,6 +703,12 @@
 				s.className = "error";
 				s.textContent = "Liste konnte nicht geladen werden (" + err.message + ").";
 			});
+
+		/* Service Worker: haelt nur die Huelle offline, damit sich die App
+		   installieren laesst. Details in sw.js. */
+		if ("serviceWorker" in navigator) {
+			addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+		}
 	</script>
 </body>
 </html>
