@@ -24,7 +24,7 @@
    wuerden die Nachbar-Apps auf derselben Domain ihren Bestand verlieren.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = `pwviewer-${VERSION}`;
 
 const SHELL = [
@@ -72,10 +72,12 @@ self.addEventListener('fetch', (event) => {
     const cache = await caches.open(CACHE);
     try {
       const response = await fetch(request);
-      if (response && response.ok) cache.put(request, response.clone());
+      // Ohne Suchteil ablegen: pointclouds.json?nocache=<Zeit> und view.html?p=…
+      // legten sonst bei jedem Aufruf einen neuen Eintrag an.
+      if (response && response.ok) cache.put(url.origin + url.pathname, response.clone());
       return response;
     } catch (e) {
-      const hit = await cache.match(request);
+      const hit = await cache.match(request, { ignoreSearch: true });
       if (hit) return hit;
       // Der Start aus der installierten App kommt als "./" herein –
       // beim Nachschlagen die Suchparameter ignorieren.
