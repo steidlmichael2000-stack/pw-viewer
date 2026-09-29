@@ -24,7 +24,7 @@
    wuerden die Nachbar-Apps auf derselben Domain ihren Bestand verlieren.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const VERSION = 'v3';
+const VERSION = 'v4';
 const CACHE = `pwviewer-${VERSION}`;
 
 const SHELL = [
@@ -33,7 +33,12 @@ const SHELL = [
   'manifest.webmanifest',
   'logo.svg',
   'icon-192.png',
-  'icon-512.png'
+  'icon-512.png',
+  'fonts/mstools.css',
+  'fonts/jetbrains-mono-latin.woff2',
+  'fonts/jetbrains-mono-latin-ext.woff2',
+  'fonts/outfit-latin.woff2',
+  'fonts/outfit-latin-ext.woff2'
 ];
 
 // Schwergewichte und Fremdbestand — hier nicht anfassen.

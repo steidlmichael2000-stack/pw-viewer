@@ -3,13 +3,11 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-xcfOdzGvNegmHBoVi+mT/O4EiwU8sQrlq8LgzvlLWts=' 'sha256-HGurcLSFDtmGXJOauLJAYgjsu03TBslmks+/asu67Jc=' 'wasm-unsafe-eval' https://cdn.jsdelivr.net/npm/three@0.160.0/; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev; connect-src 'self' blob: https://cdn.jsdelivr.net/npm/three@0.160.0/ https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev; worker-src 'self' blob:; base-uri 'self'">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-0xPYukZd32K+3WaV2o1kmKLvVAiuoKfUGDt/nZnLmlk=' 'sha256-Ahvuu2rUovk9oSLGYtSiMv6rvLqKNQ/nGuDwpzTY93Y=' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev; connect-src 'self' blob: https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev; worker-src 'self' blob:; base-uri 'self'">
 	<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 	<title>3D-Modell</title>
 	<link rel="icon" href="logo.svg" type="image/svg+xml">
-	<link rel="preconnect" href="https://fonts.googleapis.com">
-	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-	<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="fonts/viewer.css">
 	<style>
 		:root {
 			--ctrl-bg: rgba(15,20,23,.82);
@@ -128,8 +126,8 @@
 	<script type="importmap">
 	{
 		"imports": {
-			"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-			"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+			"three": "./libs/three-0.160.0/build/three.module.js",
+			"three/addons/": "./libs/three-0.160.0/jsm/"
 		}
 	}
 	</script>
@@ -512,7 +510,9 @@
 			mDoneBtn.addEventListener("click", mFinalize);
 
 		const draco = new DRACOLoader();
-		draco.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/");
+		// three.js und der Draco-Decoder liegen im Repo (aus dem npm-Paket three@0.160.0),
+		// damit kein fremdes CDN Code in diese Herkunft einschleusen kann.
+		draco.setDecoderPath("libs/three-0.160.0/jsm/libs/draco/");
 		const loader = new GLTFLoader();
 		loader.setDRACOLoader(draco);
 
