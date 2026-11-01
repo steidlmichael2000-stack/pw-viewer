@@ -3,7 +3,7 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-0xPYukZd32K+3WaV2o1kmKLvVAiuoKfUGDt/nZnLmlk=' 'sha256-Ahvuu2rUovk9oSLGYtSiMv6rvLqKNQ/nGuDwpzTY93Y=' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev; connect-src 'self' blob: https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev; worker-src 'self' blob:; base-uri 'self'">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-0xPYukZd32K+3WaV2o1kmKLvVAiuoKfUGDt/nZnLmlk=' 'sha256-tdSo/MSGx6/00vSZ5maH5/RvJXTp/AOdNmoiHYhQITE=' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://pwviewer-daten.steidl-michael2000.workers.dev; connect-src 'self' blob: https://pwviewer-daten.steidl-michael2000.workers.dev; worker-src 'self' blob:; base-uri 'self'">
 	<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 	<title>3D-Modell</title>
 	<link rel="icon" href="logo.svg" type="image/svg+xml">
@@ -176,7 +176,7 @@
 		import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 		import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
-		const R2_BASE = "https://pub-a58f169a0a2e4229af6efe323f6632e2.r2.dev";
+		const R2_BASE = "https://pwviewer-daten.steidl-michael2000.workers.dev";
 		const params = new URLSearchParams(location.search);
 		const raw = params.get("p") || "";
 		const pcName = /^[a-z0-9_-]+$/.test(raw) ? raw : "";
