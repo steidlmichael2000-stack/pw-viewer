@@ -1,0 +1,4 @@
+copc.js (MIT, github.com/connormanning/copc.js) mit eingebautem laz-perf
+(Apache-2.0, github.com/hobuinc/laz-perf), übernommen aus dem PW-Viewer (libs/copc).
+Lizenztexte: LICENSE-copc.txt (aus dem npm-Paket copc 0.0.9) und LICENSE-laz-perf.txt
+(Apache License 2.0, apache.org). Unverändert übernommen.

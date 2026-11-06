@@ -1,0 +1,2310 @@
+/* Topovo — Vollflächenkarte mit schwebender Bedienung
+   Farben laufen über Custom Properties, damit Hell/Dunkel an einer Stelle sitzt. */
+
+:root {
+  /* Messwerk · Nacht. Die Signalfarbe steht hier nur als Rückfallwert:
+     gesetzt wird sie aus PALETTEN in app.js als Inline-Wert auf <html>,
+     weil sie je Thema einen eigenen Ton braucht und umschaltbar ist.
+     Standard ist Lapis, der Blauton des Logos. */
+  --bg: #06070b;
+  /* Glas: durchscheinend und unscharf, die Karte bleibt darunter sichtbar.
+     Bis November 2026 deckend (.94) — seitdem gewünscht wie Apples Glas. */
+  --glass: rgba(18, 20, 28, .62);
+  /* Feste Leiste links (ab 1010 px): etwas dichter als das schwebende Glas, damit
+     Leiste und Werkzeuge über der Karte sich voneinander abheben. Am 01.11.2026
+     auf Wunsch durchsichtiger: .88 → .72, die Spalte .96 → .82 */
+  --glass-dicht: rgba(18, 20, 28, .72);
+  /* Symbolspalte daneben: eigener, dunklerer Grund, damit sie sich von der Leiste abhebt */
+  --schiene-grund: rgba(6, 7, 11, .82);
+  --blur: blur(28px) saturate(170%);
+  /* Schieberknopf: runder weißer Knauf wie bei iOS, statt des blauen Klotzes */
+  --knauf: #ffffff;
+  --knauf-schatten: 0 1px 4px rgba(0, 0, 0, .4), 0 0 0 .5px rgba(0, 0, 0, .1);
+  /* Füllfläche der Knöpfe. Seit November 2026 tragen Knöpfe keinen Rahmen mehr,
+     nur diese Fläche — umrandet sah jeder Knopf wie ein Eingabefeld aus. */
+  --panel-2: rgba(255, 255, 255, .08);
+  --line: rgba(255, 255, 255, .12);     /* nur noch Trennstriche, keine Rahmen */
+  --text: #e9ebf1;
+  --muted: #8a90a3;
+  --muted-2: rgba(255, 255, 255, .52);
+  --accent: #55a5e7;
+  --accent-ink: #06070b;
+  --ok: #34d399;
+  --warn: #ff9f0a;
+  --bad: #fb7185;
+  /* Glaskante: Licht an der Oberkante, feine Kontur ringsum, darunter ein
+     weicher Schatten, der das Glas vom Luftbild abhebt */
+  --shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 .5px rgba(255, 255, 255, .08),
+            0 8px 24px rgba(0, 0, 0, .35);
+  /* Rund wie bei Apple, in drei Stufen: große Flächen (Leisten, Menüs,
+     Sprechblasen), Knöpfe und Felder darin, kleine Schilder. Bis Oktober 2026
+     überall 2 px, bis November 10/6/4 px; die runden Kartenknöpfe bleiben rund. */
+  --r: 20px;
+  --r-knopf: 12px;
+  --r-klein: 7px;
+  --bh: 6px;              /* Grundlinie der Knöpfe rechts, von JS gesetzt (updateBH) */
+  --gap: 10px;
+  /* Rechte Kante der Knopfsäule. Bis 1010 px die Kante der Bedienspalte (Leisten
+     bis 640 px, mittig) — auf dem Handy fällt sie mit dem Fensterrand zusammen,
+     auf dem Tablet hinge die Säule sonst abgelöst draußen. Darüber stehen
+     Knöpfe und ©-Kasten in den Ecken, siehe „Große Bildschirme". */
+  --saeule: max(var(--gap), calc((100vw - 640px) / 2));
+  /* Grundlinie der Knopfsäule: bis 1010 px über der Leiste (--bh), darüber im Eck */
+  --grund: var(--bh);
+}
+
+html[data-theme="light"] {
+  --bg: #eef1f5;
+  --glass: rgba(250, 251, 253, .5);
+  --glass-dicht: rgba(250, 251, 253, .66);
+  --schiene-grund: rgba(222, 226, 233, .84);
+  --panel-2: rgba(118, 118, 128, .12);
+  --line: #d5dbe3;
+  --text: #17202a;
+  --muted: #58636f;
+  --muted-2: #7b8794;
+  --accent: #1761a3;
+  --accent-ink: #ffffff;
+  --ok: #15803d;
+  --warn: #d96400;
+  --bad: #c62828;
+  --shadow: inset 0 1px 0 rgba(255, 255, 255, .85), inset 0 0 0 .5px rgba(25, 35, 50, .06),
+            0 8px 26px rgba(25, 35, 50, .16);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) {
+    --bg: #eef1f5;
+    --glass: rgba(250, 251, 253, .5);
+    --glass-dicht: rgba(250, 251, 253, .66);
+    --schiene-grund: rgba(222, 226, 233, .84);
+    --panel-2: rgba(118, 118, 128, .12);
+    --line: #d5dbe3;
+    --text: #17202a;
+    --muted: #58636f;
+    --muted-2: #7b8794;
+    --accent: #1761a3;
+    --accent-ink: #ffffff;
+    --ok: #15803d;
+    --warn: #d96400;
+    --bad: #c62828;
+    --shadow: inset 0 1px 0 rgba(255, 255, 255, .85), inset 0 0 0 .5px rgba(25, 35, 50, .06),
+              0 8px 26px rgba(25, 35, 50, .16);
+  }
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+/* Das hidden-Attribut ist nur eine Browserregel und verliert gegen jedes eigene
+ * display: -- ohne diese Zeile stehen als versteckt markierte Bloecke wie die
+ * Farbwahl je Datei, das XML-Feld beim WMS oder der Nordknopf trotzdem offen. */
+[hidden] { display: none !important; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-text-size-adjust: 100%;
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px;
+  padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ---------- Karte ---------- */
+
+#map {
+  position: fixed; inset: 0;
+  background: var(--bg);
+  z-index: 0;
+}
+
+.leaflet-container { font: inherit; font-size: .8rem; background: var(--bg); }
+
+/* Dunkle Grundkarte: MapLibre zeichnet hinter Leaflet, Leaflet wird dafür
+   durchsichtig. !important schlägt den Inline-Wert, den applyBaseOpacity
+   beim Verblassen setzt — das Weiß gehört dann unter die GL-Karte. */
+/* Über die ID: maplibre-gl.css setzt auf .maplibregl-map position: relative,
+   und damit hatte die Fläche die Höhe 0 */
+#glKarte { position: fixed; inset: 0; z-index: 0; pointer-events: none; background: var(--bg); }
+#glKarte[hidden] { display: none; }
+/* Farbe und Abdunkeln der Bilder, wenn Leaflet sie zeichnet (applyBildRegler) */
+.dop-ebene { filter: saturate(var(--dop-farbe, 1)) brightness(var(--bild-hell, 1)); }
+.relief-ebene { filter: brightness(var(--bild-hell, 1)); }
+#map.gl-grund { background: transparent !important; }
+
+/* Maßstab und Attribution stehen nicht mehr in der Karte, sondern in der
+   Quellenzeile ganz unten. In den Kartenecken bleibt nichts. */
+
+/* Maßstab — links im Kasten unten. Innen die Zahl über einem Winkel ⊔, dessen
+   Breite Leaflet als Inline-Wert setzt. Alles auf ganzen Pixeln (Kasten:
+   Rahmen 1 + Inhalt 20 + 1): Zahl 3–13, Winkel 13–18, Unterkante 17–18.
+   text-shadow: none, weil leaflet.css der Zahl „1px 1px #fff" mitgibt — auf
+   dunklem Grund franste sie davon aus. Eine Kontur braucht es nicht, die
+   Fläche des Kastens deckt. */
+.quellen .leaflet-control-scale {
+  float: none; margin: 0; height: 20px; box-sizing: border-box;
+  padding: 0 8px; background: none; border: 0;
+}
+.quellen .leaflet-control-scale-line {
+  position: relative; box-sizing: border-box; height: 20px;
+  border: 0; background: none; text-shadow: none;
+  padding: 3px 0 0; color: var(--muted);
+  font-size: 10px; font-weight: 600; line-height: 10px; text-align: center;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.quellen .leaflet-control-scale-line::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 5px;
+  box-sizing: border-box; border: 1px solid currentColor; border-top: 0;
+}
+
+/* ---------- Quellenzeile: ein Kasten links ----------
+   (Ab 1010 px Breite steht der Kasten stattdessen im Eck, siehe „Große
+   Bildschirme".) Ohne Ergebnisleiste ganz unten, mit ihr 8 px darüber — auf derselben
+   Grundlinie wie Standort- und Messknopf rechts (updateBH). Im Quelltext
+   steht die Zeile hinter #ziel und #bottom, damit „#ziel[hidden] +
+   #bottom[hidden] + .quellen" greift; order zieht sie im Bild über beide.
+   Die Zeile ist immer 22 px hoch. Sie selbst nimmt keine Tipps an, nur der
+   Kasten darin — sonst schluckte der leere Streifen daneben jeden Griff auf
+   die Karte. Der aufgeklappte Quellentext legt sich 4 px darüber und lässt
+   rechts 50 px frei: Dort stehen Standort- und Messknopf (42 px + 8 Luft). */
+.quellen {
+  position: relative; flex: none; order: 1;
+  width: min(640px, calc(100% - 2 * var(--gap)));
+  height: 22px;
+  margin: auto auto 8px;
+  display: flex;
+}
+.bar-bottom, .bar-ziel { order: 2; }
+#hoehenLeiste[hidden] + #ziel[hidden] + #bottom[hidden] + .quellen { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
+/* Bei offenem Menü treten die Leisten zurück (openSheet) — wie ohne Leiste */
+.menue-offen .bar-bottom, .menue-offen .bar-ziel { display: none; }
+.menue-offen .quellen { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
+.ui > .quellen { pointer-events: none; }
+.quellen-kasten, .quellen-text { pointer-events: auto; }
+.quellen-kasten {
+  display: flex; height: 22px; box-sizing: border-box;
+  background: var(--glass); border: 1px solid transparent; border-radius: var(--r-knopf);
+}
+.quellen-text { position: absolute; left: 0; right: 50px; bottom: calc(100% + 4px); display: flex; }
+.quellen.zu .quellen-text { display: none; }
+/* Aus der Karte herausgehängt greifen die .leaflet-container-Regeln nicht mehr;
+   was von .leaflet-control bleibt, wird hier festgelegt. */
+.quellen .leaflet-control-attribution {
+  float: none; margin: 0; padding: 3px 7px;
+  background: var(--glass); border: 1px solid transparent; border-radius: var(--r-knopf);
+  color: var(--muted); font-size: .62rem; line-height: 1.45; text-align: left;
+}
+.quellen .leaflet-control-attribution a { color: var(--muted); text-decoration: none; }
+/* Links im Kasten, vom Maßstab durch einen 1-px-Strich getrennt */
+.quellen-knopf {
+  flex: none; width: 21px; height: 20px; padding: 0;
+  display: grid; place-items: center;
+  border: 0; border-right: 1px solid var(--line);
+  background: none; color: var(--accent);        /* Signalfarbe aus den Einstellungen */
+  font: inherit; font-size: .74rem; font-weight: 600; line-height: 1; cursor: pointer;
+}
+/* Aufgeklappt wie ein eingeschalteter Knopf; padding-box, damit die Tönung
+   nicht auch unter dem Trennstrich liegt und der doppelt deckt */
+.quellen-knopf[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  background-clip: padding-box;
+}
+
+/* Nordknopf — oben auf der Knopfsäule rechts: Standort 0–42, Messen 48–90,
+   Abstecken 96–138, Nord darüber über der Grundlinie. Er erscheint nur bei
+   gedrehter Karte und sitzt dann oben auf, ohne dass die darunter rutschen.
+   Fehlt der Absteckknopf (keine Punkte geladen), rückt Nord auf 96 herunter.
+   Links unten bleibt allein der Kasten mit © und Maßstab. */
+.north {
+  position: fixed;
+  right: var(--saeule);
+  bottom: calc(var(--grund) + 144px + env(safe-area-inset-bottom));
+  z-index: 450;
+  width: 42px; height: 42px;
+  display: grid; place-items: center; gap: 0;
+  border-radius: 50%; border: 1px solid transparent;
+  background: var(--glass); color: var(--text);
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  cursor: pointer;
+}
+.north svg { width: 27px; height: 27px; }
+.north .nord { fill: var(--bad); }
+.north .sued { fill: var(--muted-2); }
+.north text { fill: var(--muted); font-family: inherit; font-size: 8px; font-weight: 700; }
+
+/* Standortknopf — rechts, über den Zoomknöpfen */
+.maploc {
+  position: fixed;
+  /* Unterkante auf der Grundlinie des Kastens unten links, bei offener Leiste
+     8 px darüber (--bh aus updateBH) */
+  right: var(--saeule);
+  bottom: calc(var(--grund) + env(safe-area-inset-bottom));
+  z-index: 450;
+  width: 42px; height: 42px;
+  display: grid; place-items: center;
+  border-radius: 50%; border: 1px solid transparent;
+  background: var(--glass); color: var(--muted);
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  cursor: pointer;
+}
+.maploc svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; }
+.maploc svg circle:first-child { fill: currentColor; stroke: none; }
+/* Der Knopf in der Signalfarbe wie alle übrigen Knöpfe. Der Standort selbst auf
+   der Karte (.me-dot, Kreis, Lot) bleibt blau — die Signalfarbe trägt schon der
+   gefundene Punkt, und beide sollen sich unterscheiden lassen. */
+/* Eingeschaltet bleibt der Knopf aus Glas, nur leicht getönt, das Zeichen in der
+   Farbe — wie der Standortknopf bei Apple Karten. Als volle Fläche stand die
+   Lichtkante des Glases als heller Ring auf dem dunklen Blau. */
+.maploc.is-on { color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--glass)); }
+.maploc.busy { opacity: .6; }
+.maploc.busy svg .ring { stroke-dasharray: 6 5; }
+
+/* Messen — über dem Knopf für das Ablesen */
+.mapmess {
+  position: fixed;
+  right: var(--saeule);
+  bottom: calc(var(--grund) + 48px + env(safe-area-inset-bottom));      /* 42 px Knopf + 6 Luft */
+  z-index: 450;
+  width: 42px; height: 42px;
+  display: grid; place-items: center;
+  border-radius: 50%; border: 1px solid transparent;
+  background: var(--glass); color: var(--muted-2);
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  cursor: pointer;
+}
+.mapmess svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+.mapmess.is-on, .mapmess[aria-expanded="true"] { color: var(--warn); background: color-mix(in srgb, var(--warn) 22%, var(--glass)); }
+
+/* Messmenü — links neben dem Messknopf, Unterkante auf dessen Unterkante */
+.mess-menue {
+  position: fixed;
+  right: calc(var(--saeule) + 48px);
+  bottom: calc(var(--grund) + 48px + env(safe-area-inset-bottom));
+  z-index: 460;
+  width: min(250px, calc(100vw - 2 * var(--gap) - 48px));
+  background: var(--glass); border: 1px solid transparent; border-radius: var(--r);
+  overflow: hidden;      /* die Tönung beim Antippen bleibt in den runden Ecken */
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+.mess-menue button {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 10px 12px; border: 0; border-top: 1px solid var(--line); border-radius: 0;
+  background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.mess-menue button:first-child { border-top: 0; }
+.mess-menue button:active { background: color-mix(in srgb, var(--warn) 13%, transparent); }
+.mess-menue svg { flex: none; width: 20px; height: 20px; fill: none; stroke: var(--warn); stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+.mess-menue svg .voll { fill: var(--warn); stroke: none; }
+.mess-menue b { display: block; font-size: .9rem; font-weight: 650; }
+.mess-menue small { display: block; font-size: .74rem; color: var(--muted); }
+
+/* Abstecken — über dem Messen. Nur da, wenn eine sichtbare KML-Datei Punkte
+   hat; dann rückt der Nordknopf eine Stufe höher. Der Knopf steht im Quelltext
+   vor dem Nordknopf, sonst griffe der Geschwisterwähler nicht. */
+.mapziel {
+  position: fixed;
+  right: var(--saeule);
+  bottom: calc(var(--grund) + 144px + env(safe-area-inset-bottom));
+  z-index: 450;
+  width: 42px; height: 42px;
+  display: grid; place-items: center;
+  border-radius: 50%; border: 1px solid transparent;
+  background: var(--glass); color: var(--muted-2);
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  cursor: pointer;
+}
+.mapziel svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+.mapziel.is-on { color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--glass)); }
+.mapziel:not([hidden]) ~ .north { bottom: calc(var(--grund) + 192px + env(safe-area-inset-bottom)); }
+
+/* Laserpunkte in 3D — eigener Knopf über dem Messen (seit November 2026; Abstecken
+   und Nord stehen deshalb eine Stufe höher). Am Desktop in der Symbolspalte. */
+.maplaser {
+  position: fixed;
+  right: var(--saeule);
+  bottom: calc(var(--grund) + 96px + env(safe-area-inset-bottom));
+  z-index: 450;
+  width: 42px; height: 42px;
+  display: grid; place-items: center;
+  border-radius: 50%; border: 1px solid transparent;
+  background: var(--glass); color: var(--muted-2);
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  cursor: pointer;
+}
+.maplaser svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+.maplaser svg .voll { fill: currentColor; stroke: none; }
+.maplaser.is-on { color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--glass)); }
+
+/* ---------- Große Bildschirme: ©-Kasten und Knöpfe in die Ecken ----------
+   Neben der 640 px breiten Bedienspalte ist dann Platz. Der ©-Kasten steht
+   unten links, die Knopfsäule unten rechts, beide mit der Unterkante auf der
+   der Leiste, 6 px über dem Rand. So springen sie auch nicht mehr mit, wenn
+   eine Leiste auf- oder zugeht. Die Grenze: Mit voll langem Maßstab und dem ?
+   der Tour wird der Kasten 159 px breit (über alle Zoomstufen nachgemessen);
+   ab 1010 px bleiben neben der Spalte dann mindestens 16 px Luft. */
+@media (min-width: 1010px) {
+  :root { --saeule: var(--gap); --grund: 6px; }
+  /* Die Zeile bleibt als Abstandhalter im Fluss — ihr margin-top: auto hält die
+     Leisten unten —, ihr Inhalt wandert ins Eck */
+  .quellen, #hoehenLeiste[hidden] + #ziel[hidden] + #bottom[hidden] + .quellen { height: 0; margin-bottom: 0; }
+  .quellen-kasten { position: fixed; left: var(--gap); bottom: calc(6px + env(safe-area-inset-bottom)); }
+  /* Der aufgeklappte Quellentext bleibt in seiner Ecke, so breit wie die Seitenleiste */
+  .quellen-text {
+    position: fixed; left: var(--gap); right: auto;
+    bottom: calc(6px + 22px + 4px + env(safe-area-inset-bottom));
+    max-width: var(--seite);
+  }
+  /* Das Messmenü reicht dann über die Spalte — es gehört über eine offene Leiste */
+  .mess-menue { z-index: 510; }
+}
+
+/* ---------- schwebende Bedienung ---------- */
+
+.ui {
+  position: fixed; inset: 0;
+  z-index: 500;
+  pointer-events: none;
+  display: flex; flex-direction: column;
+}
+.ui > * { pointer-events: auto; }
+
+.bar {
+  width: min(640px, calc(100% - 2 * var(--gap)));
+  margin: 0 auto;
+  background: var(--glass);
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+}
+
+.bar-top { margin-top: calc(var(--gap) + env(safe-area-inset-top)); flex: none; }
+.bar-bottom {
+  position: relative;
+  margin-top: 0;             /* den Abstand nach oben trägt die Quellenzeile darüber */
+  margin-bottom: calc(6px + env(safe-area-inset-bottom));
+  padding: 12px 14px 13px;
+  flex: none;
+}
+/* Abstecken: über der unteren Leiste, 8 px Luft dazwischen. Ist die untere zu,
+   steht sie selbst ganz unten. */
+.bar-ziel {
+  position: relative;
+  margin-top: 0; margin-bottom: 8px;
+  padding: 12px 14px 13px;
+  flex: none;
+}
+.bar-ziel:has(+ #bottom[hidden]) { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
+#hoehenLeiste:has(+ #ziel[hidden] + #bottom[hidden]) { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
+
+/* Höhenfarben: Skala waagerecht, links tief, rechts hoch — die Farben wie HOEHEN_RAMPE */
+.hoehen-skala { margin-top: 10px; }
+.hoehen-balken {
+  height: 10px; border-radius: 3px;
+  background: linear-gradient(to right, #2c3e94, #2a7dc4, #33b2b0, #7ccc6c, #e6dd55, #f19a3c, #c8382f);
+}
+.hoehen-werte {
+  display: flex; justify-content: space-between; margin-top: 4px;
+  font-size: .76rem; color: var(--text); font-variant-numeric: tabular-nums;
+}
+.hoehen-skala.ohne-skala { display: none; }
+.bar-hoehen .bb-actions .maps:disabled { background: var(--panel-2); color: var(--muted-2); }
+
+/* ---------- Suchzeile ---------- */
+
+/* Die obere Leiste ist im Ruhezustand nur eine Zeile. Die Aufteilung in Strecke
+   und Kilometer klappt erst auf, wenn man die Zeile antippt -- und faellt danach
+   wieder zusammen, damit von der Karte moeglichst wenig verdeckt bleibt. */
+
+.search { padding: 6px; }
+
+.qrow { display: flex; align-items: center; gap: 4px; }
+
+/* Die Lupe ist der Suchknopf. Sie sieht aus wie das Zeichen, das in jeder
+   Suchzeile links steht -- und genau deshalb braucht es daneben keinen zweiten
+   Knopf mehr, der dasselbe tut. */
+.qgo {
+  flex: none; width: 34px; height: 34px; padding: 0; margin-left: 2px;
+  display: grid; place-items: center;
+  border: none; border-radius: var(--r-knopf); background: none; cursor: pointer;
+}
+/* In der Signalfarbe, wie das ©: Die Lupe ist der Einstieg in die App und darf
+   auffallen, nicht erst, wenn die Suche schon offen ist. */
+.qgo svg {
+  width: 19px; height: 19px;
+  fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round;
+}
+.qgo:active svg { stroke: var(--text); }
+/* Laeuft gerade eine Abfrage, ist die Lupe nicht noch einmal ausloesbar. */
+.qgo.busy { pointer-events: none; opacity: .5; }
+
+#q {
+  flex: 1 1 auto; min-width: 0;
+  padding: 11px 2px; border: none; background: none; outline: none;
+  font: inherit; font-size: 1.06rem; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+#q::placeholder { color: var(--muted-2); font-weight: 500; opacity: 1; }
+
+/* Das Kreuz steht nur da, wenn auch etwas in der Zeile steht. */
+/* Das × leert und klappt zu — es steht da, sobald etwas drinsteht oder die Leiste offen ist */
+.search:not(.hat-text):not(.offen) .qclear { display: none; }
+
+.qclear {
+  flex: none; width: 30px; height: 30px; padding: 0;
+  display: grid; place-items: center;
+  border: none; border-radius: var(--r-knopf); cursor: pointer;
+  background: none; color: var(--muted-2);
+}
+.qclear svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.qclear:active { color: var(--text); }
+
+/* Aufgeklappter Teil. Die Hoehe ist fest genug angesetzt, dass beide Felder
+   samt Beschriftung hineinpassen; ueber max-height laesst sich das anders als
+   ueber auto sauber schieben.
+
+   Bei einer Orts- oder Koordinatensuche bleibt er zu: dort gibt es keinen
+   Kilometer, und die Trefferliste soll den Platz haben. */
+.detail {
+  max-height: 0; opacity: 0; overflow: hidden;
+  transition: max-height .2s ease, opacity .16s ease;
+}
+.search.offen:not(.frei) .detail { max-height: 100px; opacity: 1; }
+
+.detail-in {
+  display: flex; align-items: stretch; gap: 2px;
+  margin-top: 6px; padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.field { position: relative; flex: 1 1 0; min-width: 0; padding: 4px 10px 5px; border-radius: var(--r-knopf); }
+.field:focus-within { background: var(--panel-2); }
+.field-ref { flex-grow: 1.15; }
+.field + .field { box-shadow: inset 1px 0 0 var(--line); }
+
+.field label {
+  display: block;
+  font-size: .64rem; font-weight: 600; letter-spacing: .5px; text-transform: uppercase;
+  color: var(--muted-2);
+  margin-bottom: -1px;
+}
+
+.field input {
+  width: 100%; padding: 0; border: none; background: none; outline: none;
+  font: inherit; font-size: 1.12rem; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.field input::placeholder {
+  color: color-mix(in srgb, var(--muted-2) 62%, transparent);
+  font-weight: 500; opacity: 1;
+}
+
+.more {
+  flex: none;
+  display: grid; place-items: center;
+  border: none; cursor: pointer;
+  border-radius: var(--r-knopf);
+  width: 38px; height: 40px; background: none; color: var(--muted);
+}
+.more svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.more:active, .more.is-on { color: var(--accent); }
+
+.progress {
+  height: 2px; margin: 0 6px 4px;
+  border-radius: var(--r-knopf); overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.progress::after {
+  content: ""; display: block; height: 100%; width: 40%;
+  background: var(--accent);
+  animation: slide 1.1s ease-in-out infinite;
+}
+@keyframes slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+/* ---------- Live-Zeile beim Verfolgen des Standorts ---------- */
+
+.live {
+  width: min(640px, calc(100% - 2 * var(--gap)));
+  margin: 8px auto 0;
+  padding: 7px 12px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: var(--glass);
+  border: 1px solid transparent;
+  border-radius: var(--r);          /* wie die Leisten */
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  font-size: .8rem;
+}
+.live .tag { flex: none; }
+.live-teil { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
+.live-teil b { font-weight: 650; font-variant-numeric: tabular-nums; }
+.live-teil small { color: var(--muted); font-size: .74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Der Kilometer an der eigenen Stelle ist ein Knopf -- ein Tipp haelt ihn fest.
+   Er soll aber wie die uebrigen Stuecke der Zeile aussehen und nicht wie eine
+   Schaltflaeche, deshalb erbt er Schrift und Farbe und bringt nur die
+   groessere Zahl mit. */
+.live-km {
+  appearance: none; -webkit-appearance: none;
+  background: none; border: 0; padding: 0; margin: 0;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.live-km b { font-size: 1.02rem; letter-spacing: -.01em; }
+.live-km-aus b { color: var(--muted-2); font-weight: 600; }
+
+/* ---------- Regenradar ---------- */
+
+.radar {
+  flex: none;
+  width: min(640px, calc(100% - 2 * var(--gap)));
+  margin: 8px auto 0;
+  padding: 6px 8px 7px;
+  background: var(--glass);
+  border: 1px solid transparent;
+  border-radius: var(--r);          /* wie die Leisten */
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+/* Bei offenem Menü steht sie nicht zwischen Suchzeile und Menü */
+.ui:has(> .sheet:not([hidden])) > .radar { display: none; }
+
+
+.radar-zeile { display: flex; align-items: center; gap: 8px; }
+.radar-knopf {
+  flex: none; width: 30px; height: 30px; padding: 0;
+  display: grid; place-items: center;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2); color: var(--muted); cursor: pointer;
+}
+.radar-knopf svg { width: 14px; height: 14px; fill: currentColor; }
+.radar-knopf .strich { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.radar-knopf .pause { display: none; }
+.radar-knopf.is-on {
+  border-color: transparent; color: var(--accent-ink);
+  background: var(--accent);
+  background-clip: padding-box;
+}
+.radar-knopf.is-on .spiel { display: none; }
+.radar-knopf.is-on .pause { display: inline; }
+/* Abspielen rund wie die Kartenknöpfe: ein Medienknopf, kein Menüknopf — und
+   gefüllt in der Signalfarbe, grau auf grauem Glas war er nicht als Knopf zu sehen */
+#radarSpiel { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); }
+#radarZu { border-color: transparent; background: none; color: var(--muted-2); }
+#radarZu svg { width: 15px; height: 15px; }
+
+.radar-text { flex: none; width: 6.6em; margin: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.radar-text b { font-size: .92rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.radar-text small { font-size: .66rem; color: var(--muted); white-space: nowrap; }
+.radar-text.vorhersage small { color: var(--warn); }
+.radar-text.laedt b { color: var(--muted); }
+
+/* Zeitleiste. Links eine Stunde Messung, dann zwei Stunden Radarvorhersage,
+   dahinter das Modell; darunter die Marken. Positionen beziehen sich auf die
+   Mitte des Knaufs: Der Knauf (20 px) läuft von 10 px bis Breite − 10 px. */
+.radar-regler { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.radar-zeit {
+  /* Anteile setzt radarLeisteWerte: ohne Modell 1/3 und 1, mit Modell kürzer */
+  --jetzt: calc(10px + (100% - 20px) * var(--a-jetzt, .3333));   /* Mitte des 20-px-Knopfs bei „jetzt“ */
+  --modell: calc(10px + (100% - 20px) * var(--a-modell, 1));    /* ab hier ICON-EU */
+  width: 100%; height: 22px; margin: 0;
+  -webkit-appearance: none; appearance: none; cursor: pointer; background: none;
+}
+/* Eine durchgehende Spur in drei Helligkeiten statt Strich, Strichel und Punkten
+   (die wirkten zerrissen, Nov. 2026): Messung kräftig, Radarvorhersage mittel,
+   Modell blass. Orange als Spurfarbe hat der Nutzer abgelehnt. Ein Verlauf mit harten Stufen,
+   nicht drei Hintergründe: background-position rechnet Prozente vom Rest
+   (Fläche − Bild), die Teile saßen dadurch versetzt und ließen eine Lücke. */
+.radar-zeit {
+  --spur: linear-gradient(90deg,
+    color-mix(in srgb, var(--text) 60%, transparent) 0 var(--jetzt),
+    color-mix(in srgb, var(--text) 32%, transparent) var(--jetzt) var(--modell),
+    color-mix(in srgb, var(--text) 14%, transparent) var(--modell) 100%);
+}
+.radar-zeit::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--spur); }
+.radar-zeit::-moz-range-track { height: 4px; border-radius: 2px; background: var(--spur); }
+/* Marken unter der Spur, auf die Mitte des Knaufs gerechnet wie --jetzt */
+.radar-marken { position: relative; height: 12px; margin-top: -1px; }
+.radar-marken span {
+  position: absolute; top: 0; left: calc(10px + (100% - 20px) * var(--a));
+  transform: translateX(-50%); white-space: nowrap;
+  font-size: .6rem; line-height: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.radar-marken span.anfang { transform: translateX(-10px); }
+.radar-marken span.ende { transform: translateX(calc(-100% + 10px)); }
+.radar-zeit::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 20px; height: 20px; margin-top: -8px;
+  border: 0; border-radius: 50%; background: var(--knauf); box-shadow: var(--knauf-schatten);
+}
+.radar-zeit::-moz-range-thumb {
+  width: 20px; height: 20px; border: 0; border-radius: 50%;
+  background: var(--knauf); box-shadow: var(--knauf-schatten);
+}
+.radar-zeit:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+/* Farbskala in mm/h — die Stufen des Dienstes, je ein gleich breites Feld */
+.radar-legende { display: flex; align-items: flex-end; gap: 6px; margin-top: 5px; }
+.radar-skala { flex: 1; min-width: 0; }
+/* Volle Farben, obwohl die Fläche auf der Karte nur 45 % deckt: Auf dem dunklen
+   Grund der Leiste wurden die Stufen mit 45 % trüb und kaum unterscheidbar. Eine
+   Fassung wie auf der Karte (45 % auf dem Kartenton, Linie oben) gefiel dem
+   Nutzer im November 2026 schlechter — die vollen Farben bleiben. */
+.radar-stufen { display: flex; height: 6px; }
+.radar-stufen i { flex: 1; background: var(--f); }
+.radar-werte { position: relative; height: 12px; margin-top: 2px; }
+.radar-werte span, .radar-einheit {
+  font-size: .6rem; line-height: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.radar-werte span { position: absolute; top: 0; }
+.radar-einheit { flex: none; }
+
+/* Fadenkreuz in der Kartenmitte beim Messen */
+.mittekreuz {
+  position: fixed; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px; height: 40px;
+  z-index: 440; pointer-events: none;
+}
+.mittekreuz svg {
+  width: 40px; height: 40px;
+  fill: none; stroke: var(--warn); stroke-width: 2; stroke-linecap: round;
+  filter: drop-shadow(0 0 2px var(--bg)) drop-shadow(0 0 3px var(--bg));
+}
+
+/* Laufende Entfernung neben dem Fadenkreuz */
+.mitte-zahl {
+  position: absolute; left: 46px; top: 50%; transform: translateY(-50%);
+  font-size: .84rem; font-weight: 700; color: var(--warn);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+  text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 5px var(--bg);
+}
+.mitte-zahl:empty { display: none; }
+
+/* ---------- Verlauf beim Tippen ---------- */
+
+.suggest {
+  border-top: 1px solid var(--line);
+  padding: 6px;
+  max-height: 46vh; overflow-y: auto;
+}
+.suggest-item {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  padding: 10px 11px; border: none; border-radius: var(--r-knopf);
+  background: none; color: var(--text); font: inherit; font-size: .92rem;
+  text-align: left; cursor: pointer;
+}
+.suggest-item:hover, .suggest-item:focus-visible { background: var(--panel-2); }
+.suggest-item b { font-weight: 650; font-variant-numeric: tabular-nums; }
+.suggest-item span { color: var(--muted); font-size: .82rem; }
+.suggest-item .tail { margin-left: auto; color: var(--muted-2); font-size: .74rem; }
+
+/* Ort oder Betriebsstelle -- das Zeichen links sagt, was einen beim Antippen
+   erwartet: eine Ortschaft auf der Karte oder ein Bahnhof mit DS100. */
+.suggest-item .s-ikon {
+  flex: none; width: 17px; height: 17px; align-self: center;
+  fill: none; stroke: var(--muted); stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.suggest-item .s-ikon.bahn { stroke: var(--accent); }
+.s-treffer { align-items: center; }
+.suggest-item .s-text {
+  min-width: 0; display: flex; flex-direction: column; gap: 1px;
+  color: var(--text); font-size: .92rem;
+}
+.suggest-item .s-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.suggest-info { margin: 0; padding: 9px 11px; color: var(--muted); font-size: .84rem; }
+
+/* Mit den Pfeiltasten durch die Liste: die markierte Zeile muss sich vom
+   blossen Ueberfahren mit der Maus unterscheiden, sonst weiss man nach einem
+   Tastendruck nicht, wo man steht. */
+.suggest-item.aktiv {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* ---------- Menü ---------- */
+
+.sheet {
+  width: min(640px, calc(100% - 2 * var(--gap)));
+  margin: 8px auto 0;
+  padding: 4px 16px 16px;
+  background: var(--glass);
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  overflow-y: auto;
+  max-height: calc(100dvh - 150px);
+}
+
+.sheet-sec { padding: 12px 0; }
+.sheet-sec + .sheet-sec { border-top: 1px solid var(--line); }
+.sheet-sec h2 {
+  font-size: .68rem; font-weight: 600; letter-spacing: .5px; text-transform: uppercase;
+  color: var(--muted); margin: 0;
+}
+
+/* Jeder Abschnitt klappt zu: Das Menü ist sonst eine sehr lange Rolle, und die
+ * Farb- und Symbolwahl je Datei bringt noch einmal reichlich Bedienelemente mit. */
+.sheet-sec > summary {
+  display: flex; align-items: center; gap: 7px;
+  padding: 3px 0; cursor: pointer;
+  list-style: none;
+}
+.sheet-sec > summary::-webkit-details-marker { display: none; }
+/* Pfeil rechtsbündig: zu nach unten (aufklappen), offen nach oben (zuklappen).
+   Der Winkel ist ein um 45° gedrehtes Quadrat von 8,6 px mit Rand. Sein
+   sichtbarer Teil reicht von der Mitte bis 6,1 px darunter (bzw. darüber) —
+   3 px Versatz setzen ihn in beiden Lagen auf die Textmitte. */
+.sheet-sec > summary::after {
+  content: ""; flex: none;
+  width: 7px; height: 7px; margin: 0 4px 0 auto;
+  border-right: 1.6px solid var(--muted-2); border-bottom: 1.6px solid var(--muted-2);
+  transform: translateY(-3px) rotate(45deg);
+  transition: transform .15s;
+}
+.sheet-sec[open] > summary::after { transform: translateY(3px) rotate(-135deg); }
+.sheet-sec[open] > summary { margin-bottom: 9px; }
+.sheet-sec[open] > summary h2 { color: var(--text); }
+.sheet-sec > summary:hover h2 { color: var(--text); }
+
+/* Symbol je Abschnitt, in derselben Farbe wie die Überschrift daneben */
+.sec-ikon {
+  flex: none; width: 16px; height: 16px;
+  fill: none; stroke: var(--muted); stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.sec-ikon .voll { fill: var(--muted); stroke: none; }
+.sheet-sec[open] > summary .sec-ikon { stroke: var(--text); }
+.sheet-sec[open] > summary .sec-ikon .voll { fill: var(--text); }
+.sheet-sec > summary:hover .sec-ikon { stroke: var(--text); }
+.sheet-sec > summary:hover .sec-ikon .voll { fill: var(--text); }
+
+.stack { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.stack input {
+  width: 100%; padding: 11px 13px; font: inherit; font-size: .92rem;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2); color: var(--text); outline: none;
+}
+.stack input:focus { border-color: var(--accent); }
+
+/* Raster statt Flex: Stehen zwei Regler untereinander (Hintergrund, Farbe), beginnen
+   sie trotz verschieden langer Namen an derselben Stelle. */
+.slider-row {
+  display: grid; grid-template-columns: 5.6em minmax(0, 1fr) auto; align-items: center;
+  gap: 12px; margin-top: 10px; font-size: .8rem; color: var(--muted);
+}
+.slider-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+/* Firefox gibt Schiebereglern eine Mindestbreite von gut 130 px: Ohne min-width 0
+   schrumpfte der Regler nicht, und die Zahl rutschte unter den Griff der Leiste. */
+input[type="range"] { min-width: 0; }
+.slider-val { flex: none; min-width: 3.4em; text-align: right; font-variant-numeric: tabular-nums; }
+
+.stack textarea {
+  width: 100%; padding: 11px 13px; font: inherit; font-size: .82rem;
+  border: 1px solid transparent; border-radius: var(--r-knopf); resize: vertical;
+  background: var(--panel-2); color: var(--text); outline: none;
+}
+.stack textarea:focus { border-color: var(--accent); }
+
+
+.seg { display: flex; gap: 7px; flex-wrap: wrap; }
+.seg-btn {
+  flex: 1 1 auto; padding: 9px 12px;
+  font: inherit; font-size: .84rem; font-weight: 500;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2); color: var(--text); cursor: pointer;
+  white-space: nowrap;
+}
+/* Zwei gleich breite Knöpfe je Reihe (Auswahl der Festpunkte) */
+.seg-paar .seg-btn { flex: 1 1 0; }
+/* Rückmeldung beim Tippen — vor allem für die Aktionsknöpfe (Layer laden, Aktualisieren) */
+.seg-btn:active { filter: brightness(1.12); }
+/* Gewählt: volle Signalfarbe. Ohne Rahmen ging eine bloße Tönung auf dem Glas unter. */
+.seg-btn.is-on {
+  border-color: transparent; color: var(--accent-ink);
+  background: var(--accent);
+}
+
+/* Signalfarbe. Jedes Feld zeigt beide Töne der Farbe — links den fürs
+ * Dunkle, rechts den fürs Helle. Rund wie die Farbwahl bei iOS. */
+.pal-label {
+  margin: 14px 0 7px; font-size: .78rem; font-weight: 600; color: var(--muted);
+}
+/* Steht die Gruppenzeile gleich unter der Überschrift, reicht deren Abstand */
+.sheet-sec > summary + .pal-label { margin-top: 0; }
+/* Zehn Farben in zwei gleichen Reihen statt einer, die irgendwo umbricht */
+.pal { display: grid; grid-template-columns: repeat(5, 32px); gap: 12px; padding: 4px; }
+.pal-btn {
+  width: 32px; height: 32px; padding: 0;
+  border: 0; border-radius: 50%;
+  background: linear-gradient(90deg, var(--pal-dark) 0 50%, var(--pal-light) 50% 100%);
+  cursor: pointer;
+}
+.pal-btn.is-on { outline: 2px solid var(--text); outline-offset: 2px; }
+.pal-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+/* Überall, wo ein langer Druck etwas tut, darf das Handy weder Text markieren
+ * noch sein Kontextmenü zeigen: die Knöpfe Parzellen, DB-Netz und Festpunkte
+ * (Auswahl), „In Google Maps öffnen" (Street View) und die Karte selbst (Punkt
+ * setzen — dort markierte es sonst die Schilder). Wer eine neue Geste einbaut,
+ * hängt sie hier an. Die Sprechblasen bleiben markierbar, damit man Koordinaten
+ * herauskopieren kann. */
+.parz-knopf, a[data-sv], .leaflet-container {
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+}
+.leaflet-container .leaflet-popup-content { -webkit-user-select: text; user-select: text; }
+.parz-jetzt {
+  display: inline-block; width: 9px; height: 9px; margin-right: 7px;
+  border: 1px solid var(--muted-2); background: var(--parz, #000);
+}
+/* Fluss statt Raster: „Auto" ist breiter als ein Farbfeld und stand im
+ * 32-px-Raster halb im Nachbarn */
+.parz-pal { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+/* DB-Netz: drei Striche vor dem Wort, gleich groß wie das Farbfeld der Parzellen */
+.ifg-wahl-zeichen {
+  display: inline-block; width: 10px; height: 9px; margin-right: 7px;
+  stroke: currentColor; stroke-width: 1.4; fill: none;
+}
+/* Zwischen zwei Knopfreihen oben und unten je 10 px. Unten fällt der Rand mit
+   den 7 px der nächsten Reihe zusammen — es gilt der größere, nicht die Summe. */
+.parz-wahl { margin-bottom: 10px; }
+.parz-wahl .pal-label { margin-top: 10px; }
+.parz-wahl .wahl-hinweis { margin: 8px 0 0; }
+.parz-btn {
+  position: relative; width: 30px; height: 30px; padding: 0;
+  border: 0; border-radius: 50%;
+  background: var(--parz); cursor: pointer;
+}
+.parz-btn.is-on { outline: 2px solid var(--text); outline-offset: 2px; }
+.parz-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+/* Auto ist ein Wort, kein Farbfeld — eingeschaltet wie die Knöpfe darüber */
+.parz-auto {
+  width: auto; padding: 0 11px; border-radius: var(--r-knopf);
+  background: var(--panel-2); color: var(--muted);
+  font: inherit; font-size: .76rem; font-weight: 600;
+}
+.parz-auto.is-on {
+  border-color: transparent; color: var(--accent-ink); box-shadow: none;
+  background: var(--accent);
+  background-clip: padding-box;
+}
+/* Eigene Farbe: das Farbfeld des Systems liegt unsichtbar über dem Plus */
+.parz-eigen {
+  display: grid; place-items: center; overflow: hidden;
+  background: var(--parz, var(--panel-2)); color: var(--muted);
+  font-size: 1.05rem; font-weight: 500; line-height: 1;
+}
+.parz-eigen.is-on span { visibility: hidden; }
+.parz-eigen input {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer;
+}
+
+.fac-out:not(:empty) { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.fac-item {
+  width: 100%; text-align: left; padding: 10px 12px;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2); color: var(--text); font: inherit; font-size: .88rem; cursor: pointer;
+}
+.fac-item small { display: block; color: var(--muted); font-size: .76rem; margin-top: 1px; }
+
+/* ---------- Liste der geladenen KML-Dateien ---------- */
+
+.kml-list:not(:empty) { margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
+/* Ohne Dateien stünden „öffnen“ und „Namen auf der Karte“ ohne Luft untereinander */
+.kml-list:empty + .seg { margin-top: 8px; }
+
+.kml-zeile { display: flex; flex-direction: column; gap: 6px; }
+.kml-item { display: flex; gap: 6px; }
+
+.kml-tog {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; text-align: left;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2); color: var(--muted); font: inherit; font-size: .88rem; cursor: pointer;
+}
+.kml-tog.is-on {
+  border-color: transparent; color: var(--accent-ink);
+  background: var(--accent);
+}
+
+/* Zeigt Farbe und Form, mit denen die Datei auf der Karte liegt — und öffnet die Wahl */
+.kml-dot {
+  flex: none; width: 38px;
+  display: grid; place-items: center;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2); cursor: pointer;
+}
+.kml-dot:active { filter: brightness(1.15); }
+
+.kml-edit-kopf { display: flex; align-items: baseline; gap: 8px; }
+.kml-edit-kopf .kml-lab { flex: 1; }
+.kml-zu {
+  flex: none; padding: 3px 9px;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--glass); color: var(--muted);
+  font: inherit; font-size: .74rem; font-weight: 600; cursor: pointer;
+}
+
+.kml-edit {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2);
+}
+.kml-wahl { display: flex; gap: 6px; flex-wrap: wrap; }
+.kml-farbe {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 2px solid transparent; cursor: pointer;
+}
+.kml-farbe.is-on { border-color: var(--text); }
+.kml-form {
+  width: 34px; height: 30px;
+  display: grid; place-items: center;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--glass); color: var(--muted); cursor: pointer;
+}
+.kml-form.is-on, .kml-feld.is-on {
+  border-color: transparent; color: var(--accent-ink);
+  background: var(--accent);
+}
+.kml-auto { width: auto; padding: 0 10px; font: inherit; font-size: .76rem; font-weight: 600; }
+/* „wie Datei": ein Farbfeld mit den Farben aus der Datei vor dem Wort */
+.kml-quelle { display: inline-flex; align-items: center; gap: 7px; }
+.kml-quelle span { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 0 1.5px rgba(255,255,255,.85); }
+
+/* Merkmalsknoepfe: welches Feld unterscheidet, was in der Beschriftung steht */
+.kml-feld {
+  padding: 6px 10px;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--glass); color: var(--muted);
+  font: inherit; font-size: .76rem; cursor: pointer;
+}
+.kml-feld small { color: var(--muted-2); font-size: .68rem; }
+
+.kml-lab {
+  margin: 2px 0 0;
+  font-size: .64rem; font-weight: 600; letter-spacing: .5px; text-transform: uppercase;
+  color: var(--muted-2);
+}
+
+/* Legende: welcher Merkmalswert traegt welche Form */
+.kml-legende { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.kml-mehr { align-self: center; font-size: .72rem; color: var(--muted-2); }
+.kml-legende span {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: .74rem; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+
+/* Fläche eines geschlossenen Polygons, in seiner Mitte */
+.mess-lbl.mess-flaeche { font-size: .86rem; transform: translate(-50%, -50%); }
+
+/* Große Zahl beim Messen; im Live sagt der Zusatz, wohin gemessen wird */
+.mess-zahl small { font-size: .74rem; font-weight: 500; color: var(--muted); }
+
+/* Die laufende Zahl zum Standort steht schwächer als die festen Abschnitte */
+.mess-lbl.mess-live { opacity: .85; font-weight: 600; }
+
+/* A und B im freien Profil: 26 px Griff zum Ziehen, sichtbar nur der Punkt wie
+   sonst beim Messen; das Schild steht wie dort 7 px rechts oberhalb */
+.prof-griff { cursor: grab; }
+.prof-griff.leaflet-drag-target, .prof-griff:active { cursor: grabbing; }
+.prof-griff i {
+  position: absolute; left: 7px; top: 7px; width: 12px; height: 12px; box-sizing: border-box;
+  border: 2px solid #fff; border-radius: 50%; background: #ff9f0a;
+}
+.prof-griff .mess-lbl { position: absolute; left: 20px; top: 6px; }
+
+/* Route mit dem Auto: Start weiß mit Ring, Endpunkt (Zufahrt) gefüllt in der
+   Signalfarbe und 2 px größer, damit man ihn zum Ziehen findet. Beide Mitten
+   liegen rechnerisch auf 13/13 wie der Anker. */
+.route-griff.start i { background: #fff; border-color: var(--accent); }
+.route-griff.zufahrt i { left: 6px; top: 6px; width: 14px; height: 14px; background: var(--accent); }
+.route-lbl {
+  position: absolute; left: 20px; top: 6px;
+  font-size: .72rem; font-weight: 700; line-height: 1; white-space: nowrap; pointer-events: none;
+  color: var(--accent);
+  text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 5px var(--bg);
+}
+
+/* Maßzahl an der gemessenen Strecke */
+.mess-lbl {
+  display: block;
+  font-size: .72rem; font-weight: 700; line-height: 1;
+  color: var(--warn);
+  text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 5px var(--bg);
+  white-space: nowrap; pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* inline würde die Grundlinie mitrechnen und das Symbol um ein Haar versetzen */
+.kml-sym svg { display: block; }
+/* Festpunkte (fpSymbolSvg): ein leichter Schatten hebt sie vom Luftbild ab */
+.fp-sym svg { display: block; filter: drop-shadow(0 0 1px rgba(0, 0, 0, .55)); }
+
+/* Name neben dem Symbol auf der Karte — wie die Kilometerbeschriftung */
+.kml-lbl {
+  display: block;
+  font-size: .66rem; font-weight: 600; line-height: 1;
+  color: var(--text);
+  text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 5px var(--bg);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.kml-txt { min-width: 0; }
+.kml-nm, .kml-txt small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Dateinamen bis zwei Zeilen, umbrochen nach „_“, „-“ und „.“: In der Leiste am Desktop
+   (115 px für den Namen) stand sonst nur „AP_PS-Punk…“ da */
+.kml-nm {
+  white-space: normal; overflow-wrap: break-word;     /* Umbruch nach _ - . setzt <wbr> in app.js */
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+}
+.kml-txt small { color: var(--muted-2); font-size: .74rem; }
+
+.kml-ic {
+  flex: none; width: 40px;
+  display: grid; place-items: center;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2); color: var(--muted); cursor: pointer;
+}
+.kml-ic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.kml-ic:active { filter: brightness(1.15); }
+.kml-ic.del:active { color: var(--bad); }
+
+/* ---------- Sprechblase eines KML-Objekts ---------- */
+
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: var(--glass); color: var(--text);
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+.leaflet-popup-content-wrapper { border: 1px solid transparent; border-radius: var(--r); }
+.leaflet-popup-content { margin: 11px 13px; font-size: .82rem; line-height: 1.5; }
+.leaflet-popup-close-button { color: var(--muted-2) !important; }
+
+.kml-pop b { display: block; font-size: .92rem; font-weight: 650; margin-bottom: 2px; }
+.kml-pop span { display: block; color: var(--muted); white-space: pre-line; }
+.kml-pop i { font-style: normal; color: var(--muted-2); }
+.kml-pop a { display: inline-block; margin-top: 6px; color: var(--accent); }
+.kml-pop small { display: block; margin-top: 6px; color: var(--muted-2); font-size: .68rem; }
+/* Street View hinter dem langen Druck auf „In Google Maps öffnen" (svBinden);
+   gegen die Textauswahl siehe .parz-knopf */
+.bb-actions .sv-hinweis { display: block; font-size: .68rem; font-weight: 500; opacity: .78; }
+/* Street View in der Sprechblase: ein Link, der aussieht wie die Knöpfe darüber */
+.kml-pop a.kml-km { box-sizing: border-box; color: var(--accent); text-decoration: none; }
+
+/* Knopf in der Sprechblase — dieselbe Sprache wie die Feinrechnung unten,
+   nur schmaler, weil die Blase wenig Platz hat. In der Signalfarbe: Das ist
+   eine Handlung, kein „in Ordnung". padding-box, weil Fläche und Rahmen beide
+   halb durchsichtig sind — sonst deckte der Rahmen doppelt. */
+.kml-km {
+  display: block; width: 100%; margin-top: 9px;
+  padding: 7px 10px; border-radius: var(--r-knopf); text-align: left; cursor: pointer;
+  font: inherit; font-size: .8rem; font-weight: 650;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  background-clip: padding-box;
+  color: var(--accent);
+}
+.kml-km small { margin-top: 1px; color: var(--muted); font-weight: 400; }
+.kml-km:active { filter: brightness(1.15); }
+
+/* Von Hand gesetzter Punkt: bewusst anders als die Stecknadel des Ergebnisses,
+   damit man sieht, was noch Rohmaterial ist und was schon gerechnet wurde. */
+.merk-pin {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, .35);
+}
+
+/* Wetter: drei Werte nebeneinander, groß und mit gleich breiten Ziffern */
+.wetter { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.wetter-wert {
+  padding: 7px 9px; border: 1px solid transparent; border-radius: var(--r-knopf); background: var(--panel-2);
+}
+.wetter-wert small { display: block; font-size: .66rem; color: var(--muted); }
+.wetter-wert b { display: block; margin-top: 2px; font-size: 1rem; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wetter-ort { margin: 6px 0 0; font-size: .72rem; color: var(--muted); }
+.wetter-ort:empty { display: none; }
+
+/* „Erklärung": klappt die Texte eines Abschnitts auf, zu ist die Vorgabe */
+.erkl-knopf {
+  display: inline-flex; align-items: center; gap: 6px; margin: 12px 0 0; padding: 4px 0;
+  border: 0; background: none; color: var(--muted); cursor: pointer;
+  font: inherit; font-size: .74rem; font-weight: 600;
+}
+.erkl-knopf::before {
+  content: ""; width: 0; height: 0; border-style: solid; border-width: 4px 0 4px 6px;
+  border-color: transparent transparent transparent currentColor;
+}
+.erkl-knopf[aria-expanded="true"]::before { transform: rotate(90deg); }
+.erkl-knopf:hover, .erkl-knopf[aria-expanded="true"] { color: var(--text); }
+.erkl { margin-top: 6px; }
+.fine { font-size: .74rem; color: var(--muted); line-height: 1.6; margin: 0 0 8px; }
+.fine:last-child { margin-bottom: 0; }
+.fine strong { color: var(--text); }
+.fine a { color: var(--accent); }
+
+/* ---------- untere Leiste ---------- */
+
+/* Wegdrücken, vor allem nach einem versehentlichen Tipp auf die Karte */
+.bb-close {
+  position: absolute; top: 5px; right: 6px;
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  border: none; border-radius: 50%;
+  background: none; color: var(--muted-2); cursor: pointer;
+}
+.bb-close svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; }
+.bb-close:active { color: var(--text); }
+
+/* Das ? links neben dem ×: erklärt die Werkzeugleiste (HILFE in tour.js) */
+.bb-hilfe {
+  position: absolute; top: 5px; right: 38px;
+  width: 32px; height: 32px; padding: 0;
+  display: grid; place-items: center;
+  border: none; border-radius: 50%;
+  background: none; color: var(--muted-2); cursor: pointer;
+}
+.bb-hilfe svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+.bb-hilfe .voll { fill: currentColor; stroke: none; }
+.bb-hilfe:active { color: var(--text); }
+.bb-hilfe ~ .bb-head, .bb-hilfe ~ .ab-kopf { padding-right: 62px; }
+
+/* Info und Teilen klein im Kopf, links neben dem × (Reihenfolge von rechts: ×, Teilen, i) */
+.bb-eck {
+  position: absolute; top: 5px; right: 38px;
+  width: 32px; height: 32px; padding: 0;
+  display: grid; place-items: center;
+  border: none; border-radius: 50%;
+  background: none; color: var(--muted-2); cursor: pointer;
+}
+.bb-eck.info { right: 70px; }
+.bb-eck svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.bb-eck .voll { fill: currentColor; stroke: none; }
+.bb-eck:active { color: var(--text); }
+.bb-eck.is-on { color: var(--accent); }
+/* Die Knöpfe stehen im Markup hinter dem Kopf, deshalb :has statt ~ */
+#bottom:has(> .bb-eck) .bb-head, #bottom:has(> .bb-eck) .bb-reihe { padding-right: 94px; }
+
+.bb-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-right: 30px; }
+.bb-title { font-size: 1.02rem; font-weight: 650; margin: 0; }
+.bb-sub { font-size: .76rem; color: var(--muted); margin: 2px 0 0; }
+
+.tag {
+  padding: 2px 8px; border-radius: var(--r-klein);
+  font-size: .68rem; font-weight: 600; white-space: nowrap;
+  border: 1px solid transparent; color: var(--muted); background: var(--panel-2);
+  /* Die farbigen Schilder tragen halbdurchsichtige Fläche und Rahmen: ohne
+     padding-box läge die Fläche auch unter dem Rahmen, der dann doppelt deckt */
+  background-clip: padding-box;
+}
+/* background-color, nicht background: Die Kurzform setzt background-clip
+   stillschweigend auf border-box zurück, und der Rahmen deckte wieder doppelt. */
+.tag.ok { color: var(--ok); border-color: transparent; background-color: color-mix(in srgb, var(--ok) 14%, transparent); }
+.tag.warn { color: var(--warn); border-color: transparent; background-color: color-mix(in srgb, var(--warn) 14%, transparent); }
+.tag.bad { color: var(--bad); border-color: transparent; background-color: color-mix(in srgb, var(--bad) 14%, transparent); }
+
+.bb-coord {
+  font-size: .94rem; font-weight: 600; font-variant-numeric: tabular-nums;
+  margin: 9px 0 0; color: var(--text);
+}
+/* Info-Feld über den Knöpfen, vom i-Knopf aufgeklappt. Der Strich trennt es
+   von der Überschrift; die Koordinate ist mit einem Tipp ganz markiert. */
+.bb-info { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); }
+.bb-info[hidden] { display: none; }
+.bb-info .bb-coord { margin-top: 0; user-select: all; -webkit-user-select: all; }
+.bb-note { font-size: .76rem; color: var(--warn); line-height: 1.5; margin: 7px 0 0; }
+.bb-note.plain { color: var(--muted); }
+
+.refine {
+  display: block; width: 100%; margin-top: 10px;
+  padding: 10px 13px; border-radius: var(--r-knopf); text-align: left; cursor: pointer;
+  font: inherit; font-size: .88rem; font-weight: 650;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  background-clip: padding-box;
+  color: var(--accent);
+}
+.refine small {
+  display: block; margin-top: 1px;
+  font-size: .72rem; font-weight: 400; color: var(--muted);
+}
+.refine:active { filter: brightness(1.15); }
+
+.bb-err { font-size: .86rem; color: var(--bad); margin: 0; }
+
+.bb-actions { display: flex; gap: 8px; margin-top: 11px; }
+/* Fünf kurze Knöpfe beim Messen: umbrechen statt die Beschriftung zerquetschen */
+.bb-actions.wrap { flex-wrap: wrap; }
+.bb-actions.wrap button { flex: 1 1 28%; padding: 10px 6px; }
+.bb-actions a, .bb-actions button {
+  flex: 1 1 0; min-width: 0;
+  display: grid; place-items: center;
+  padding: 12px 8px; border-radius: var(--r-knopf);
+  font: inherit; font-size: .86rem; font-weight: 600;
+  text-decoration: none; cursor: pointer;
+  border: 1px solid transparent; background: var(--panel-2); color: var(--text);
+}
+/* In der Signalfarbe aus den Einstellungen. Die Schrift darauf (--accent-ink)
+   setzt applyPalette je Ton auf Schwarz oder Weiß — Grün ist hier nicht mehr
+   „in Ordnung", sondern war bloß die frühere Festfarbe. */
+.bb-actions .maps { flex: 1 1 0; background: var(--accent); border-color: transparent; color: var(--accent-ink); }
+.bb-actions .maps:active { filter: brightness(.92); }
+.bb-actions .maps { padding-top: 7px; padding-bottom: 7px; }
+/* Info und Teilen als quadratische Symbole, so hoch wie der Maps-Knopf daneben */
+.bb-actions .bb-ikon { flex: none; width: 46px; padding: 0; }
+.bb-ikon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.bb-ikon svg .voll { fill: currentColor; stroke: none; }
+/* Offenes Info-Feld: wie ein eingeschalteter Knopf im Menü (.seg-btn.is-on) */
+.bb-actions .bb-ikon.is-on {
+  border-color: transparent; color: var(--accent-ink);
+  background: var(--accent);
+}
+/* Profil am Gleis: orange wie Messen und Profil auf der Karte */
+.bb-actions .bb-ikon.gp { color: var(--warn); border-color: transparent; }
+/* Laserpunkte in 3D: Schrift statt Zeichnung, „3D“ sagt es knapper als jedes Symbol */
+.bb-actions .bb-ikon.lz-3d { font-size: .82rem; font-weight: 700; letter-spacing: .02em; }
+
+/* Geländehöhe unter dem Ergebnis, in den Sprechblasen und beim Abstecken.
+   Steht als Platzhalter da, bis der Wert kommt — die Leiste springt nicht. */
+.hoehe {
+  display: block; margin: 4px 0 0;
+  font-size: .76rem; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.hoehe b { font-weight: 650; color: var(--text); }
+.kml-pop .hoehe { margin-top: 2px; }
+.kml-pop .hoehe b { display: inline; margin: 0; font-size: inherit; }
+.ab-kopf-txt .hoehe { margin-top: 1px; }
+
+.pick { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 10px; }
+.pick button {
+  flex: 1 1 auto; padding: 8px 14px; border-radius: var(--r-knopf);
+  border: 1px solid transparent; background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent); font: inherit; font-size: .92rem; font-weight: 650; cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.pick small { display: block; font-size: .68rem; font-weight: 500; opacity: .75; }
+.pick button.is-on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+/* Mehrere Achspunkte: die Zeile, die zwischen ihnen umschaltet */
+.bb-reihe {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  margin: 0 0 8px; padding-right: 34px;      /* Platz für das Schließkreuz */
+}
+.bb-chip {
+  padding: 4px 10px; border-radius: var(--r-knopf);
+  border: 1px solid transparent; background: var(--panel-2);
+  color: var(--muted); font: inherit; font-size: .84rem; font-weight: 650;
+  font-variant-numeric: tabular-nums; cursor: pointer; white-space: nowrap;
+}
+.bb-chip.is-on { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+
+.bb-actions button:disabled { color: var(--muted-2); cursor: default; }
+
+/* ---------- Tour durch die App (tour.js) ---------- */
+
+/* Das ? im ©-Kasten, leicht getönt, damit man es findet. padding-box: Die
+   Tönung soll nicht unter dem Trennstrich liegen, der sonst doppelt deckte. */
+.tour-start {
+  font-weight: 700;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  background-clip: padding-box;
+}
+
+/* Die Ebene nimmt während der Tour alle Griffe ab */
+.tour { position: fixed; inset: 0; z-index: 700; }
+/* Das Loch: ein Rahmen in der Signalfarbe um das Ziel, dessen breiter Schatten
+   den Rest abdunkelt — kein Schein, eine deckende Fläche mit Aussparung */
+.tour-loch {
+  position: absolute; pointer-events: none;
+  border-radius: calc(var(--r) + 4px);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 200vmax rgba(0, 0, 0, .58);
+  transition: left .25s ease, top .25s ease, width .25s ease, height .25s ease;
+}
+.tour-loch.kreis { border-radius: 50%; }
+.tour-loch.leer { box-shadow: 0 0 0 200vmax rgba(0, 0, 0, .58); }
+
+.tour-blase {
+  position: absolute; width: min(340px, calc(100vw - 20px));
+  padding: 12px 13px 11px;
+  background: var(--glass); border: 1px solid transparent; border-radius: var(--r);
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  transition: left .25s ease, top .25s ease;
+}
+.tour-kopf { display: flex; align-items: baseline; gap: 8px; }
+.tour-zahl { flex: none; font-size: .72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Während einer Vorführung steht es nur da — nichts blinkt */
+.tour.laeuft .tour-zahl::after { content: " · läuft …"; }
+.tour-titel { font-size: .95rem; font-weight: 650; }
+.tour-zu {
+  margin-left: auto; align-self: center; flex: none;
+  width: 28px; height: 28px; display: grid; place-items: center;
+  border: 0; border-radius: var(--r-knopf); background: none; color: var(--muted-2); cursor: pointer;
+}
+.tour-zu svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; }
+.tour-text { margin: 6px 0 11px; font-size: .84rem; line-height: 1.5; color: var(--text); }
+
+.tour-fuss { display: flex; align-items: center; gap: 6px; }
+.tour-punkte { display: flex; gap: 4px; margin-right: auto; }
+.tour-punkte i { width: 6px; height: 3px; border-radius: 2px; background: var(--line); }
+.tour-punkte i.is-on { width: 14px; background: var(--accent); }
+.tour-knopf-2, .tour-weiter {
+  padding: 8px 14px; border-radius: var(--r-knopf);
+  font: inherit; font-size: .84rem; font-weight: 600; cursor: pointer;
+  border: 1px solid transparent; background: var(--panel-2); color: var(--text);
+}
+.tour-weiter { background: var(--accent); border-color: transparent; color: var(--accent-ink); }
+.tour-knopf-2:disabled { color: var(--muted-2); cursor: default; }
+
+/* Das Angebot beim ersten Start, über dem ©-Kasten (Lage aus tour.js) */
+.tour-angebot {
+  position: fixed; z-index: 650; width: min(300px, calc(100vw - 20px));
+  padding: 11px 12px;
+  background: var(--glass); border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: var(--r); box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+.tour-angebot p { margin: 0 0 10px; font-size: .84rem; line-height: 1.5; }
+.tour-angebot-zeichen {
+  display: inline-grid; place-items: center; width: 17px; height: 17px;
+  border-radius: var(--r-klein); font-weight: 700; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.tour-angebot .tour-fuss { justify-content: flex-end; }
+/* Der Datensatz im Tour-Angebot: kleiner und gedämpft, er ist Beigabe, nicht Frage */
+.tour-angebot p.tour-angebot-daten { margin-top: -4px; font-size: .76rem; color: var(--muted); }
+.tour-angebot a { color: var(--accent); }
+.tour-angebot .tour-fuss a { display: inline-grid; place-items: center; text-decoration: none; color: var(--text); }
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-loch, .tour-blase { transition: none; }
+}
+
+/* ---------- Querprofil ---------- */
+
+/* Quer | Längs im Kopf, rechts vor dem Schließkreuz */
+.prof-art {
+  margin-left: auto; align-self: center; display: inline-flex;
+  border: 1px solid transparent; border-radius: var(--r-knopf); overflow: hidden;
+}
+.prof-art button {
+  padding: 3px 9px; border: 0; background: var(--panel-2); color: var(--muted);
+  font: inherit; font-size: .74rem; font-weight: 600; cursor: pointer;
+}
+.prof-art button + button { border-left: 1px solid var(--line); }
+.prof-art button.is-on { background: var(--accent); color: var(--accent-ink); }
+/* Teilen als PDF, rechts im Kopf vor dem Schließkreuz */
+.prof-teilen {
+  flex: none; align-self: center; margin-left: auto; width: 30px; height: 26px;
+  display: grid; place-items: center; padding: 0; cursor: pointer;
+  border: 1px solid transparent; border-radius: var(--r-knopf); background: var(--panel-2); color: var(--text);
+}
+.prof-art + .prof-teilen { margin-left: 6px; }
+.prof-teilen svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; }
+/* Auswahl, Fortschritt und „fertig" des PDF-Exports */
+.prof-pdf {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+  font-size: .78rem; color: var(--muted);
+}
+.prof-pdf button {
+  padding: 5px 10px; border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: color-mix(in srgb, var(--accent) 20%, transparent); background-clip: padding-box;
+  color: var(--accent); font: inherit; font-weight: 600; cursor: pointer;
+}
+.prof-pdf .prof-pdf-zu { margin-left: auto; border-color: transparent; background: var(--panel-2); color: var(--muted); }
+/* Die Mappe in einer eigenen Zeile darunter */
+.prof-pdf-umbruch { flex-basis: 100%; height: 0; }
+
+/* ---------- Profilmappe ---------- */
+
+.mappe-text {
+  display: block; width: 100%; box-sizing: border-box; margin-top: 9px; padding: 8px 10px;
+  border: 1px solid transparent; border-radius: var(--r-knopf); background: var(--panel-2); color: var(--text);
+  font: inherit; font-size: .9rem; line-height: 1.45; font-variant-numeric: tabular-nums; resize: vertical;
+}
+.mappe-text:focus { outline: none; border-color: var(--accent); }
+.mappe-hilfe { margin: 5px 0 0; font-size: .72rem; color: var(--muted); }
+.mappe-fehler { margin: 3px 0 0; font-size: .72rem; color: var(--warn); }
+.mappe-fehler:empty { display: none; }
+.mappe-stand { margin: 8px 0 0; font-size: .78rem; color: var(--muted); }
+/* Überhöhung als Block wie Quer | Längs: im PDF ist jede Stufe möglich, zu steil wird gestaucht und vermerkt */
+.mappe-ueber {
+  grid-column: 2 / 4; display: grid; grid-template-columns: repeat(4, 1fr);
+  border: 1px solid transparent; border-radius: var(--r-knopf); overflow: hidden;
+}
+.mappe-ueber button {
+  padding: 5px 0; border: 0; background: var(--panel-2); color: var(--text); cursor: pointer;
+  font: inherit; font-size: .78rem; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.mappe-ueber button + button { border-left: 1px solid var(--line); }
+.mappe-ueber button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.bb-actions .primary { background: var(--accent); border-color: transparent; color: var(--accent-ink); }
+.bb-actions .primary:disabled { background: var(--panel-2); border-color: transparent; color: var(--muted-2); }
+/* Der Versatz im freien Profil: Angabe und Rücksetzer in einem */
+.tag.prof-versatz {
+  font-family: inherit; cursor: pointer; font-variant-numeric: tabular-nums;
+  color: var(--accent); border-color: transparent;
+  background-color: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+/* −10 −5 −1 +1 +5 +10: sechs gleich breite Knöpfe, mittig ein Spalt zwischen zurück und vor */
+.prof-sprung {
+  display: grid; grid-template-columns: repeat(3, 1fr) 6px repeat(3, 1fr); gap: 5px; margin-top: 9px;
+}
+.prof-sprung button:nth-child(4) { grid-column: 5; }
+.prof-sprung button {
+  padding: 8px 0; border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2); color: var(--text); cursor: pointer;
+  font: inherit; font-size: .84rem; font-weight: 650; font-variant-numeric: tabular-nums;
+  touch-action: manipulation;          /* zwei schnelle Tipps sind zwei Sprünge, kein Zoom */
+}
+.prof-sprung button:active { background: color-mix(in srgb, var(--warn) 18%, var(--panel-2)); }
+
+/* Wischen im Diagramm führt den Zeiger, statt die Seite zu verschieben */
+/* Ladebalken unter „Gelände wird geladen": skaliert statt breiter, damit er
+ * ohne Umbruch der Leiste mitläuft */
+.prof-balken { height: 4px; margin-top: 8px; border-radius: 2px; overflow: hidden; background: var(--panel-2); }
+.prof-balken i {
+  display: block; height: 100%; background: var(--warn);
+  transform: scaleX(0); transform-origin: left center; transition: transform .25s linear;
+}
+.prof-bild { margin-top: 6px; touch-action: none; user-select: none; -webkit-user-select: none; }
+.prof-bild svg { display: block; overflow: visible; font-size: 11px; font-variant-numeric: tabular-nums; cursor: crosshair; }
+.prof-bild .gitter { fill: none; stroke: var(--line); }
+.prof-bild .ecken { fill: none; stroke: var(--muted); stroke-dasharray: 2 3; }
+/* Fläche unter dem Gelände blendet nach unten aus (Verlauf #profVerlauf in profBildSetzen).
+   Nur in der App — das PDF füllt weiter flach. */
+.prof-bild .flaeche { fill: url(#profVerlauf); }
+.prof-bild .v-oben { stop-color: var(--warn); stop-opacity: .5; }
+.prof-bild .v-unten { stop-color: var(--warn); stop-opacity: 0; }
+.prof-bild .dgm { fill: none; stroke: var(--warn); stroke-width: 1.6; stroke-linejoin: round; }
+/* Gebäude (LoD2): deckende graue Blöcke, Gelände und Oberfläche laufen darüber */
+.prof-bild .geb { fill: color-mix(in srgb, var(--muted) 45%, var(--bg)); stroke: var(--text); stroke-width: .8; stroke-linejoin: miter; }
+.prof-dom.prof-geb::before { height: 8px; width: 12px; background: color-mix(in srgb, var(--muted) 45%, var(--bg)); border: 1px solid var(--text); }
+.prof-bild .dom {fill: none; stroke: var(--text); stroke-width: 1.1; stroke-dasharray: 3 2.5; opacity: .75; }
+.prof-bild .beschr text { fill: var(--muted); }
+.prof-bild .beschr .ecke { fill: var(--warn); font-weight: 650; }
+/* Fadenkreuz: senkrecht durchgezogen, waagrecht gestrichelt bis an die Höhenachse */
+.prof-bild .zeiger path { fill: none; stroke: var(--text); stroke-width: 1; }
+.prof-bild .zeiger .waag { stroke-dasharray: 3 2; }
+.prof-bild .zeiger circle { fill: var(--warn); stroke: var(--bg); stroke-width: 1.5; }
+/* Die Zahl steht auf einem kleinen Schild (Maße aus profZeigerSetzen), damit sie
+   über Gitter und Fläche lesbar bleibt — bis November 2026 mit dunkler Kontur */
+.prof-bild .zeiger .schild { fill: color-mix(in srgb, var(--text) 16%, var(--bg)); }
+.prof-bild .zeiger text { fill: var(--text); font-weight: 600; }
+
+/* Unter dem Bild: feste Zeilen, Name links, Bedienung rechts — Ebenen, Breite
+   bzw. Länge, Überhöhung. Bricht auf keinem Handy halb um. */
+.prof-regler {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px 10px;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line);
+}
+.prof-rname {
+  grid-column: 1; font-size: .66rem; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+}
+/* Die Ebenen über die ganze Breite, ohne Namen davor: neben „EBENEN" lief
+   „+1,0 MB" auf dem Handy über den Rand */
+.prof-ebenen { grid-column: 1 / 4; display: flex; gap: 6px; min-width: 0; }
+.prof-ebenen .prof-dom { flex: 1 1 0; }
+/* Der Legendeneintrag ist zugleich der Schalter der Ebene */
+.prof-dom {
+  display: flex; align-items: center; min-width: 0; padding: 5px 8px;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2); background-clip: padding-box; color: var(--muted);
+  font: inherit; font-size: .76rem; text-align: left; white-space: nowrap; cursor: pointer;
+  overflow: hidden;
+}
+.prof-dom::before {
+  content: ""; flex: none; width: 14px; margin-right: 7px; border-top: 2px dashed var(--muted);
+}
+.prof-dom small { margin-left: auto; padding-left: 6px; font-size: .68rem; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+.prof-dom.is-on {
+  color: var(--text); border-color: transparent;
+  background-color: color-mix(in srgb, var(--accent) 30%, var(--panel-2));
+}
+/* Regler über die festen Stufen: Striche wie auf einem Maßstab, runder Knauf */
+.prof-weite { --d: 20px; grid-column: 2; position: relative; display: block; height: 26px; }
+.prof-striche { position: absolute; inset: 0; pointer-events: none; }
+.prof-striche i {
+  position: absolute; top: 8px; width: 1px; height: 10px; background: var(--muted-2);
+  left: calc(var(--d) / 2 - .5px + (100% - var(--d)) * var(--p));
+}
+.prof-weite input {
+  position: relative; display: block; width: 100%; height: 26px; margin: 0;
+  -webkit-appearance: none; appearance: none; background: none; cursor: pointer;
+}
+.prof-weite input::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--panel-2); }
+.prof-weite input::-moz-range-track { height: 4px; border-radius: 2px; background: var(--panel-2); }
+.prof-weite input::-webkit-slider-thumb {
+  -webkit-appearance: none; width: var(--d); height: var(--d); margin-top: -8px;
+  border: 0; border-radius: 50%; background: var(--knauf); box-shadow: var(--knauf-schatten);
+}
+.prof-weite input::-moz-range-thumb {
+  width: var(--d); height: var(--d); box-sizing: border-box;
+  border: 0; border-radius: 50%; background: var(--knauf); box-shadow: var(--knauf-schatten);
+}
+.prof-weite input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.prof-wert {
+  grid-column: 3; min-width: 5.6em; text-align: right;
+  font-size: .8rem; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--text);
+}
+/* Steiler geht es nicht: Schieber grau, kein Zeiger */
+.prof-weite input:disabled { cursor: default; }
+.prof-weite input:disabled::-webkit-slider-thumb { background: var(--muted-2); }
+.prof-weite input:disabled::-moz-range-thumb { background: var(--muted-2); }
+/* Die Stelle unter dem Finger auf der Karte: Ring mit dunklem Rand und Mittelpunkt */
+/* Zeiger des Profils auf der Karte: gebaut wie der Standort (.me-dot) — voller
+ * Punkt mit weißem Ring —, nur in Amber und mit einem durchscheinenden Hof,
+ * damit er auf der gestrichelten Schnittlinie nicht untergeht. 26 px Icon,
+ * Hof und Punkt beide auf (13, 13) zentriert. */
+.prof-ring i {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: rgba(255, 159, 10, .28);
+}
+.prof-ring i::after {
+  content: ""; position: absolute; left: 5px; top: 5px; width: 16px; height: 16px; box-sizing: border-box;
+  border-radius: 50%; background: #ff9f0a; border: 3px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .3);
+}
+.prof-quelle { margin: 7px 0 0; font-size: .68rem; line-height: 1.45; color: var(--muted-2); }
+.prof-quelle a { color: inherit; }
+/* Im Profil braucht das Diagramm den Platz: flachere Knöpfe als in der Ergebnisleiste */
+.bb-actions.knapp { margin-top: 9px; }
+.bb-actions.knapp button { padding: 9px 6px; }
+
+/* ---------- Abstecken ---------- */
+
+/* Anzeige zum Ziel: Pfeil, Entfernung groß, darunter der Punkt. Der Pfeil zeigt
+   auf dem Bildschirm dorthin, wo der Punkt liegt — die Kartendrehung ist drin. */
+.ab-kopf { display: flex; align-items: center; gap: 12px; padding-right: 30px; }
+/* Der Pfeil ist der Schalter Karte/Kompass. Ein Rahmen zeigt, dass man ihn
+   antippen kann; darunter steht, wonach er sich gerade richtet. */
+.ab-richtung {
+  flex: none; width: 50px; padding: 4px 0 3px;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2); color: var(--muted-2); cursor: pointer;
+  font: inherit;
+}
+.ab-richtung svg { display: block; width: 30px; height: 30px; fill: var(--accent); }
+.ab-richtung span {
+  font-size: .56rem; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; line-height: 1.2;
+}
+.ab-richtung.is-on {
+  border-color: transparent; color: var(--accent-ink);
+  background: var(--accent);
+  background-clip: padding-box;
+}
+.ab-kopf-txt { flex: 1; min-width: 0; }
+.ab-weite {
+  margin: 0; font-size: 1.75rem; font-weight: 700; line-height: 1.05;
+  letter-spacing: -.01em; font-variant-numeric: tabular-nums;
+}
+.ab-name {
+  margin: 2px 0 0; font-size: .86rem; font-weight: 650;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ab-name small { margin-left: 7px; font-size: .74rem; font-weight: 400; color: var(--muted); }
+.ab-kopf .tag { flex: none; align-self: flex-start; }
+
+/* Zurück aus der Liste zur Anzeige, ohne neu zu wählen — wie „Fertig" an der Farbwahl */
+.ab-zur {
+  flex: none; margin-left: auto; padding: 3px 9px;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2); color: var(--muted);
+  font: inherit; font-size: .74rem; font-weight: 600; cursor: pointer;
+}
+
+.ab-filter {
+  display: block; width: 100%; margin-top: 10px; padding: 9px 12px;
+  font: inherit; font-size: .92rem;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2); color: var(--text); outline: none;
+}
+.ab-filter:focus { border-color: var(--accent); }
+.ab-filter::placeholder { color: var(--muted-2); opacity: 1; }
+.ab-sort { margin-top: 8px; }
+.ab-sort .seg-btn { padding: 7px 10px; font-size: .8rem; }
+
+.ab-liste {
+  margin-top: 8px; max-height: min(34vh, 300px); overflow-y: auto;
+  border-top: 1px solid var(--line);
+}
+.ab-zeile {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 6px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+  background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.ab-zeile:hover, .ab-zeile:focus-visible { background: var(--panel-2); }
+.ab-zeile.is-on {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.ab-zeile.war .ab-txt b { color: var(--muted); font-weight: 600; }
+.ab-sym { flex: none; width: 16px; display: grid; place-items: center; }
+.ab-sym svg { display: block; }
+.ab-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ab-txt b, .ab-txt small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ab-txt b { font-size: .9rem; font-weight: 650; }
+.ab-txt small { font-size: .74rem; color: var(--muted); }
+.ab-weit { flex: none; font-size: .84rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ab-pfeil { flex: none; width: 15px; height: 15px; fill: var(--accent); }
+.ab-mehr { margin: 0; padding: 8px 6px; font-size: .76rem; color: var(--muted); }
+
+/* Auf der Karte: Ring um den Zielpunkt und die Linie vom Standort dorthin, beide
+   in der Signalfarbe. Die Linie nimmt sie über die Klasse, weil Leaflet sonst
+   eine feste Farbe als Attribut setzt — CSS schlägt das Attribut. */
+.ab-linie { stroke: var(--accent); }
+.ab-marke svg { display: block; overflow: visible; }
+.ab-marke .halo { stroke: #fff; stroke-width: 5; opacity: .9; }
+.ab-marke .ring { stroke: var(--accent); stroke-width: 2.5; }
+
+/* ---------- Marker ---------- */
+
+.ms {
+  display: block;
+  font-size: .68rem; font-weight: 650; line-height: 1;
+  color: var(--text);
+  text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 5px var(--bg);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Auflage DB-Netz. Streckennummer als kleines Schild mit harter Kante, dunkel
+   auf hell wie die Linie; Kilometer etwas kleiner als die der gesuchten Strecke. */
+.ifg-nr {
+  display: block; transform: translate(-50%, -50%);
+  padding: 1px 4px; border: 1px solid #1d2733; border-radius: 2px;
+  background: #ffffff; color: #1d2733;
+  font-size: .66rem; font-weight: 700; line-height: 1.25;
+  font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none;
+}
+.ifg-km { font-size: .62rem; font-weight: 600; }
+/* Betriebsstelle: 12 px Quadrat, die Schrift rechts daneben mittig auf seiner Höhe */
+.ifg-bs {
+  display: block; width: 12px; height: 12px;
+  background: #ffffff; border: 2.5px solid #1d2733; cursor: pointer;
+}
+.ifg-bs-text {
+  position: absolute; left: 16px; top: 6px; transform: translateY(-50%);
+  font-size: .68rem; font-weight: 600; line-height: 1; color: var(--text); white-space: nowrap;
+  text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 5px var(--bg);
+  pointer-events: none;
+}
+.ifg-bs-text b { font-weight: 750; }
+.ifg-bue { display: block; cursor: pointer; }
+
+.pin {
+  width: 26px; height: 26px;
+  display: grid; place-items: center;
+  /* Die Spitze ist die spitze Ecke unten links; −45° dreht sie nach unten.
+     Mit +45° zeigte sie nach links und saß 18 px links, 11 px über der Stelle.
+     Der Anker in pinZeichnen (13, 31) liegt genau auf ihr. */
+  border-radius: 50% 50% 50% 2px;
+  transform: rotate(-45deg);
+  background: var(--accent);
+  border: 2.5px solid #fff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, .5);
+}
+.pin::after {
+  content: ""; width: 7px; height: 7px; border-radius: 50%; background: #fff;
+}
+.pin.warn { background: var(--warn); }
+.pin.bad { background: var(--bad); }
+/* Die übrigen Punkte einer Reihe: derselbe Pin, nur zurückgenommen, damit
+   erkennbar bleibt, welchen die untere Leiste gerade beschreibt. Die Größe
+   bleibt gleich — ein kleinerer Pin sitzt im selben Rahmen versetzt und zeigt
+   dann ein paar Pixel neben die Stelle. */
+.pin.neben { opacity: .7; }
+
+/* Kilometer am Pin — steht neben der Spitze, damit er auch ohne die untere
+   Leiste und auf einem Bildschirmfoto ablesbar bleibt. */
+.pin-km {
+  display: block; padding: 2px 6px; border-radius: var(--r-klein);
+  background: var(--accent); color: var(--accent-ink);
+  font-size: .72rem; font-weight: 700; line-height: 1.3;
+  white-space: nowrap; pointer-events: none;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .4);
+  border: 1.5px solid rgba(255, 255, 255, .85);
+}
+.pin-km.warn { background: var(--warn); color: #1a1206; }   /* Orange trägt keine weiße Schrift */
+.pin-km.bad { background: var(--bad); }
+.pin-km.neben { opacity: .82; }
+
+/* 44 px Trefferfläche, der Punkt sitzt in ihrer Mitte (22 − 8 = 14 px Rand) */
+.me-hit { display: grid; place-items: center; cursor: pointer; }
+.me-dot {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #2f81f7; border: 3px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .3);
+}
+
+/* ---------- Toast ---------- */
+
+.toast {
+  position: fixed; left: 50%; top: calc(76px + env(safe-area-inset-top));
+  transform: translate(-50%, -12px);
+  padding: 10px 17px; border-radius: var(--r-knopf);
+  background: var(--text); color: var(--bg);
+  font-size: .84rem; font-weight: 600;
+  opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s;
+  z-index: 900; max-width: calc(100% - 28px); text-align: center;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+
+@media (max-width: 380px) {
+  .field label { font-size: .6rem; }
+  .field input { font-size: 1.02rem; }
+  #q { font-size: 1rem; }
+  .qgo { width: 30px; }
+  .more { width: 34px; }
+}
+
+/* ---------- Aufklappen ----------
+   Fenster und Werkzeugleisten gleiten beim Erscheinen kurz herein. Als Animation
+   statt Übergang: Sie startet jedes Mal neu, wenn hidden wegfällt. Nur Lage und
+   Deckkraft — die Höhe bleibt, sonst rechnete updateBH die Knopfsäule falsch.
+   Zu geht es ohne Animation: Wer schließt, will die Karte gleich sehen.
+   Die Kurve läuft schnell los und setzt weich auf (ease-out nach Emil Kowalski). */
+:root { --auf: cubic-bezier(.23, 1, .32, 1); }
+@keyframes von-oben  { from { opacity: 0; transform: translateY(-8px); } }
+@keyframes von-unten { from { opacity: 0; transform: translateY(14px); } }
+@keyframes vom-knopf { from { opacity: 0; transform: translateX(8px) scale(.96); } }
+@keyframes einblenden { from { opacity: 0; } }
+.sheet:not([hidden]), .radar:not([hidden]), .live:not([hidden]) { animation: von-oben .26s var(--auf); }
+.bar-bottom:not([hidden]), .bar-ziel:not([hidden]) { animation: von-unten .3s var(--auf); }
+/* Das Messmenü wächst aus seinem Knopf rechts unten */
+.mess-menue:not([hidden]) { transform-origin: right bottom; animation: vom-knopf .22s var(--auf); }
+.suggest:not([hidden]) { animation: einblenden .18s ease-out; }
+/* Inhalt eines aufgeklappten Menüabschnitts */
+.sheet-sec[open] > :not(summary) { animation: von-oben .24s var(--auf); }
+.tour-angebot { animation: von-unten .3s var(--auf); }
+
+/* ---------- Desktop und Tablet quer: Symbolspalte, feste Leiste, Anwendungen unten ----------
+   Ab 1010 px Fensterbreite, entschieden nur nach der Breite — ein Tablet quer
+   kommt damit genauso zurecht. Vorbild Apple Karten (feste Leiste links, Knöpfe
+   oben rechts) und BayernAtlas (Symbolspalte, Werkzeugleiste unten rechts):
+   - links die Symbolspalte (#schiene) und daneben die Leiste aus Glas: Suche,
+     Ergebnis und — über die Spalte gewählt — ein Abschnitt des Menüs;
+   - Anwendungen (Profil, Polygon, Live, Mappe, Abstecken, Radar) unten mittig
+     über der Karte, übereinander gestapelt (Lage aus updateBH: --unten);
+   - Standort, Abstecken und Nord oben rechts, Werkzeuge unten rechts (kein
+     Plus/Minus — gezoomt wird mit Rad und Fingern, ausdrücklich so gewünscht).
+   Dieselbe Grenze steht in app.js (SEITENLEISTE). */
+.schiene, .werkzeuge, .leiste-griff, .marke { display: none; }
+
+@media (min-width: 1010px) {
+  :root { --schiene: 64px; --seite: 320px; --links: calc(var(--schiene) + var(--seite)); --werkzeug-b: 68px; }
+
+  /* Icon und Name oben links: eine Kopfzeile über Spalte und Leiste. Das Icon ist so
+     groß wie die Knöpfe der Spalte (52 × 52, links 6 = Spaltenrand), Mitte 32 auf 32;
+     der Name daneben (siehe .marke-name). Knöpfe und
+     Suche beginnen bei --marke-h = 6 + 52 + 16 — mit 4 px wie zwischen den Knöpfen
+     klebte die Kopfzeile an der Suche. Zugeklappt bleiben beide stehen. */
+  :root { --marke-h: 74px; }
+  .marke {
+    position: fixed; z-index: 1; left: 0; top: 0; height: 64px;
+    display: flex; align-items: center; pointer-events: none;
+  }
+  /* Ecken wie die Knöpfe (12 px) — das Icon selbst rundet auf 52 px nur mit 11,4 px */
+  .marke img { display: block; width: 52px; height: 52px; margin: 0 0 0 6px; border-radius: var(--r-knopf); }
+  /* Icon und Name bilden ein Zeichen wie bei Apple: Der Name beginnt an der Außenkante
+     des Suchfelds (74 = Icon-Ende 58 + 16), derselbe Abstand wie senkrecht zur Suche.
+     Umriss aus Comfortaa 700 (25,6 px), per Kontur etwas kräftiger. Grundlinie 40,5:
+     „Topovo“ ist fast nur Kleinschrift — die Mitte zwischen Versalmitte (30,5) und
+     Mitte der Kleinbuchstaben (33,5) liegt auf der Icon-Mitte 32 (optisch statt rechnerisch). */
+  .marke-name { display: block; margin-left: 16px; overflow: visible; fill: var(--text); stroke: var(--text); transition: opacity .3s var(--auf); }
+  /* Zugeklappt bleibt der Name stehen (so gewünscht), dann direkt über der Karte —
+     mit einem Hof in der Grundfarbe wie die Maßzahlen (.mess-lbl), damit er auf Luftbild
+     und Karte lesbar bleibt */
+  .leiste-zu .marke-name { filter: drop-shadow(0 0 1.5px var(--bg)) drop-shadow(0 0 3px var(--bg)); }
+  .ui { padding-top: calc(var(--marke-h) - var(--gap)); }
+
+  /* Symbolspalte */
+  .schiene {
+    position: fixed; left: 0; top: 0; bottom: 0; width: var(--schiene);
+    display: flex; flex-direction: column; gap: 4px; padding: var(--marke-h) 6px 10px;
+    background: var(--schiene-grund); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    box-shadow: inset -.5px 0 0 var(--line);
+  }
+  /* Quadratisch 52 × 52 wie das Icon darüber */
+  .schiene button {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    height: 52px; flex: none; padding: 0;
+    border: 0; border-radius: var(--r-knopf); background: none; color: var(--muted); cursor: pointer;
+    font: inherit; font-size: .64rem; font-weight: 600;
+  }
+  .schiene .sec-ikon { width: 22px; height: 22px; stroke: currentColor; }
+  .schiene .sec-ikon .voll { fill: currentColor; }
+  .schiene button:hover { background: var(--panel-2); color: var(--text); }
+  .schiene button.is-on { background: var(--accent); color: var(--accent-ink); }
+  /* Profil und Laser sind Werkzeuge, keine Bereiche: laufen sie, getönt wie in der
+     Werkzeugleiste rechts — gefüllt ist nur der Bereich, der in der Leiste offen ist */
+  .schiene .schiene-werkzeug.is-on { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
+  /* Hinweise ganz unten (so gewünscht, 04.11.2026) */
+  .schiene .schiene-unten { margin-top: auto; }
+
+  /* Feste Leiste: .ui ist die Spalte, ihr Glas liegt als ::before dahinter —
+     nicht auf .ui selbst, sonst würden die festen Anwendungen darin an der
+     Leiste statt am Fenster ausgerichtet. */
+  .ui { left: var(--schiene); right: auto; width: var(--seite); padding-bottom: 40px; }
+  .ui::before {
+    content: ""; position: fixed; z-index: -1; top: 0; bottom: 0; left: var(--schiene); width: var(--seite);
+    background: var(--glass-dicht); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    box-shadow: inset -.5px 0 0 var(--line), 8px 0 24px rgba(0, 0, 0, .18);
+    pointer-events: none;
+    transition: transform .3s var(--auf), opacity .3s var(--auf);
+  }
+  /* Zugeklappt (Tipp aufs gewählte Symbol der Spalte): nur die Spalte bleibt,
+     das Glas gleitet hinter sie, die Anwendungen rücken in die Mitte */
+  .leiste-zu { --links: var(--schiene); }
+  .leiste-zu .ui { width: 0; padding-left: 0; padding-right: 0; }
+  .leiste-zu .ui::before { transform: translateX(-100%); opacity: 0; }
+  .leiste-zu .ui > :is(.bar-top, .suggest, .sheet, .bar-bottom:not([data-art="werkzeug"])) { display: none; }
+  .ui > .bar-top { animation: einblenden .3s var(--auf); }
+  /* Griff mittig an der Kante: offen innen in der Leiste, zugeklappt außen an
+     der Spalte (innen läge er bei niedrigen Fenstern auf ihren Symbolen) */
+  .leiste-griff {
+    position: fixed; top: 50%; left: calc(var(--links) - 20px); z-index: 1; display: grid; place-items: center;
+    width: 20px; height: 48px; margin-top: -24px; padding: 0;
+    border: 0; border-radius: var(--r-knopf) 0 0 var(--r-knopf); cursor: pointer;
+    background: var(--panel-2); color: var(--muted);
+    transition: left .3s var(--auf);
+  }
+  .leiste-zu .leiste-griff {
+    left: var(--schiene); border-radius: 0 var(--r-knopf) var(--r-knopf) 0;
+    background: var(--schiene-grund); box-shadow: 4px 0 12px rgba(0, 0, 0, .15);
+  }
+  .leiste-griff:hover { color: var(--text); }
+  .leiste-griff svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; transition: transform .3s var(--auf); }
+  .leiste-zu .leiste-griff svg { transform: rotate(180deg); }
+  /* In der Leiste kein Glas auf Glas: Suche als gefülltes Feld, Menü und Ergebnis flach */
+  .bar-top, .sheet, .bar-bottom:not([data-art="werkzeug"]) {
+    background: none; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
+  .bar-top { background: var(--panel-2); border-radius: var(--r-knopf); }
+  #menuBtn { display: none; }
+  .sheet { flex: 1 1 auto; min-height: 0; max-height: none; margin-top: 4px; }
+  .bar-bottom:not([data-art="werkzeug"]) { margin: 8px auto 0; border-top: 1px solid var(--line); border-radius: 0; }
+  .bar-bottom:not([hidden]):not([data-art="werkzeug"]) { animation-name: von-oben; }
+  /* Die Quellenzeile ist nur noch Abstandhalter, ihr Inhalt steht unten in der Leiste */
+  .quellen, #hoehenLeiste[hidden] + #ziel[hidden] + #bottom[hidden] + .quellen, .menue-offen .quellen { order: 3; height: 0; margin: 0; }
+  /* Unten in der Leiste so breit wie die Suche und gefüllt wie sie — kein Glas auf Glas;
+     zugeklappt wieder als kleiner Kasten aus Glas über der Karte */
+  .quellen-kasten {
+    left: calc(var(--schiene) + var(--gap)); bottom: var(--gap); width: calc(var(--seite) - 2 * var(--gap));
+    height: 28px; align-items: center; background: var(--panel-2);
+  }
+  .quellen-kasten .quellen-mass { margin-left: auto; }
+  .quellen-kasten .quellen-knopf { width: 32px; height: 28px; }
+  .leiste-zu .quellen-kasten .quellen-knopf { width: 21px; height: 20px; }
+  .leiste-zu .quellen-kasten { width: auto; height: 22px; bottom: 6px; background: var(--glass); }
+  .leiste-zu .quellen-kasten .quellen-mass { margin-left: 0; }
+  .quellen-text { left: calc(var(--schiene) + var(--gap)); bottom: calc(var(--gap) + 28px + 4px); max-width: calc(var(--seite) - 2 * var(--gap)); }
+  .leiste-zu .quellen-text { bottom: calc(6px + 22px + 4px); }
+
+  /* Ein über die Symbolspalte gewählter Abschnitt steht allein, seine Kopfzeile ist Titel */
+  .sheet[data-nur] > .sheet-sec:not([open]) { display: none; }
+  .sheet[data-nur] > .sheet-sec { border-top: 0; }
+  .sheet[data-nur] > .sheet-sec > summary { pointer-events: none; }
+  .sheet[data-nur] > .sheet-sec > summary::after { display: none; }
+
+  /* Anwendungen unten mittig über der Karte, zwischen Leiste und Knöpfen rechts */
+  .live:not([hidden]), .radar:not([hidden]), .bar-ziel:not([hidden]),
+  .bar-bottom[data-art="werkzeug"]:not([hidden]) {
+    position: fixed; left: calc(var(--links) + 16px); right: calc(16px + var(--werkzeug-b) + 16px); bottom: var(--unten, 16px);
+    width: auto; max-width: 640px; margin: 0 auto;
+  }
+  /* Das Regenradar oben mittig (03.11.2026): Es läuft neben den Werkzeugen her
+     und kam ihnen unten im Stapel in die Quere */
+  .radar:not([hidden]) { top: 16px; bottom: auto; }
+  /* Offenes Menü und Anwendungen stören sich hier nicht */
+  .menue-offen .bar-ziel, .menue-offen .bar-bottom[data-art="werkzeug"] { display: block; }
+  .ui:has(> .sheet:not([hidden])) > .radar:not([hidden]) { display: block; }
+
+  /* Knöpfe oben rechts: Standort, Abstecken, Nord */
+  .maploc, .mapziel, .north { top: 16px; right: 16px; bottom: auto; }
+  .mapziel, .mapziel[hidden] ~ .north { top: 68px; }
+  .mapziel:not([hidden]) ~ .north { top: 120px; bottom: auto; }
+  /* Messen läuft über die Werkzeugleiste */
+  .mapmess, .mess-menue, .maplaser { display: none; }
+
+  /* Werkzeugleiste hochkant unten rechts (03.11.2026): quer lag sie den Anwendungen
+     unten mittig im Weg, die mussten bei schmalem Fenster über sie ausweichen */
+  .werkzeuge {
+    position: fixed; z-index: 450; right: 16px; bottom: 16px; width: var(--werkzeug-b);
+    display: flex; flex-direction: column; gap: 2px; padding: 4px;
+    border-radius: var(--r); background: var(--glass); box-shadow: var(--shadow);
+    backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  }
+  .werkzeuge button, .werkzeug-mess-menue button {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    width: 60px; height: 52px; padding: 0; border: 0; border-radius: var(--r-knopf);
+    background: none; color: var(--muted); cursor: pointer;
+    font: inherit; font-size: .64rem; font-weight: 600;
+  }
+  .werkzeuge svg, .werkzeug-mess-menue svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+  .werkzeuge svg .voll, .werkzeug-mess-menue svg .voll { fill: currentColor; stroke: none; }
+  .werkzeuge button:hover, .werkzeug-mess-menue button:hover { background: var(--panel-2); color: var(--text); }
+  .werkzeuge button.is-on { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
+  /* Messen nur als Symbol; klappt Polygon und Abstand nach links aus, Unterkante auf Unterkante */
+  .werkzeuge .werkzeug-mess { height: 44px; }
+  .werkzeuge .werkzeug-mess[aria-expanded="true"] { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
+  .werkzeug-mess-menue {
+    position: fixed; z-index: 510; right: calc(16px + var(--werkzeug-b) + 8px); bottom: 16px;
+    display: flex; gap: 2px; padding: 4px;
+    border-radius: var(--r); background: var(--glass); box-shadow: var(--shadow);
+    backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  }
+  .werkzeug-mess-menue[hidden] { display: none; }
+  .werkzeug-mess-menue:not([hidden]) { transform-origin: right bottom; animation: vom-knopf .22s var(--auf); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+  .progress::after { animation: none; width: 100%; }
+  .sheet, .radar, .live, .bar-bottom, .bar-ziel, .mess-menue, .suggest,
+  .sheet-sec > *, .tour-angebot { animation: none !important; }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MESSWERK · Nachtrag
+   Die Handschrift sitzt in den Tokens oben. Bewusst ohne Webfont: die App
+   muss an der Strecke auch ohne Empfang starten, und ihr Worker cacht nur
+   eigene Dateien.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Kilometerangaben laufen tabellarisch. Eine Zahl, die beim Weiterfahren
+   springt, weil die Ziffern unterschiedlich breit sind, ist hier ein
+   Fehler und kein Detail. */
+body { font-variant-numeric: tabular-nums; }
+
+/* Das Strichmaß — große Teilung 48px, kleine 8px. Bei dieser App ist es
+   kein Zierrat, sondern die Kilometrierung selbst. */
+.rule {
+  height: 14px;
+  border-top: 1px solid var(--line);
+  background-image:
+    repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 48px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.09) 0 1px, transparent 1px 8px);
+  background-size: 100% 13px, 100% 6px;
+  background-position: 0 0, 0 0;
+  background-repeat: no-repeat, no-repeat;
+}
+
+/* Start der Route als Adresse: Feld wie die Suchzeile, Treffer klappen darunter auf */
+#routeStartFeld {
+  width: 100%; box-sizing: border-box;
+  padding: 10px 12px; border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--panel-2); color: var(--text); outline: none;
+  font: inherit; font-size: .92rem; font-weight: 500;
+}
+/* Fadenkreuz rechts im Feld: Start am eigenen Standort, in der Signalfarbe, wenn er es ist */
+.route-feld { position: relative; }
+#routeStartFeld { padding-right: 44px; }
+#routeStartFeld::-webkit-search-cancel-button { display: none; }
+.route-ort {
+  position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
+  width: 34px; height: 34px; padding: 0;
+  display: grid; place-items: center;
+  border: none; border-radius: 50%; background: none; color: var(--muted); cursor: pointer;
+}
+.route-ort svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.route-ort:active { color: var(--text); }
+.route-ort.is-on { color: var(--accent); }
+.route-ort.wartet svg { animation: route-ort-puls 1s ease-in-out infinite alternate; }
+@keyframes route-ort-puls { to { opacity: .35; } }
+#routeStartFeld::placeholder { color: var(--muted-2); opacity: 1; }
+#routeStartFeld:focus { border-color: var(--accent); }
+.route-vorschlag { margin-left: -4px; padding: 4px 0 2px; max-height: 40vh; }
+/* Unter 16 px zoomt Safari auf dem iPhone beim Antippen ins Feld */
+@media (pointer: coarse) { #routeStartFeld { font-size: 1rem; } }
+
+/* Route wie in Google Maps: oben Start und Ziel (#routeKopf), unten „Mit dem Auto" */
+.bar-route { flex: none; padding: 6px 10px 6px 14px; }
+.rk-zeile { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.rk-zeile .route-feld { flex: 1 1 auto; min-width: 0; }
+.rk-weg + .rk-zeile .rk-text { border-top: 1px solid var(--line); }
+/* Start: Punkt mit weißem Rand wie der Startgriff auf der Karte; Ziel: Marke in der Signalfarbe */
+.rk-start {
+  flex: none; width: 14px; height: 14px; margin: 0 2px; box-sizing: border-box;
+  border-radius: 50%; border: 3px solid var(--accent); background: #fff;
+}
+.rk-ziel { flex: none; width: 18px; height: 18px; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+/* Gepunktet vom Start zum Ziel, wie die Zeichnung in Google Maps */
+.rk-weg {
+  display: block; width: 2px; height: 8px; margin: -6px 0 -6px 8px;
+  background: radial-gradient(circle, var(--muted-2) 1px, transparent 1.2px) 0 0 / 2px 4px;
+}
+.rk-text {
+  margin: 0; flex: 1 1 auto; min-width: 0; padding: 10px 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .92rem; color: var(--text);
+}
+.bar-route #routeStartFeld { background: none; padding-left: 0; border-radius: 0; border: 0; }
+.bar-route #routeStartFeld:focus { border: 0; }
+.route-zeit { margin: 6px 0 2px; font-size: 1.5rem; font-weight: 650; }
+.route-zeit small { font-size: 1rem; font-weight: 500; color: var(--muted); }
+
+@media (max-width: 1009.98px) {
+  /* Am Handy statt der Suchzeile oben */
+  .ui:has(> #routeKopf:not([hidden])) > :is(.bar-top, #suggest) { display: none; }
+  .bar-route { order: -1; margin-top: calc(var(--gap) + env(safe-area-inset-top)); }
+  .bar-route:not([hidden]) { animation: von-oben .3s var(--auf); }
+}
+@media (min-width: 1010px) {
+  /* In der Leiste flach unter der Suche, wie die Suche gefüllt */
+  .bar-route { margin: 8px auto 0; background: var(--panel-2); box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; border-radius: var(--r-knopf); }
+}
+
+/* ---------- Laserpunkte (laser.js) ----------
+   Ganz über der Karte, angelehnt an den PW-Viewer: runde Glasknöpfe in den Ecken,
+   die Einstellungen als Tafel unter dem Knopf links oben. */
+.laser-lade { height: 6px; margin-top: 10px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.laser-lade-balken { height: 100%; background: var(--accent); transition: width .2s; }
+/* Ohne bekannte Größe (durch den Worker die Regel): ein Stück läuft durch */
+.laser-lade.unbestimmt .laser-lade-balken { width: 35%; animation: laser-lauf 1.3s ease-in-out infinite; }
+@keyframes laser-lauf { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.bar-bottom .seg-btn:disabled { opacity: .55; }
+.laser-kachel-name {
+  transform: translate(-50%, -50%); white-space: nowrap; text-align: center;
+  font-size: .68rem; font-weight: 650; line-height: 1.25; color: #fff;
+  text-shadow: 0 0 3px rgba(0, 0, 0, .9), 0 0 6px rgba(0, 0, 0, .6);
+}
+.laser-rahmen { cursor: move; touch-action: none; }
+#laserLadenBtn:disabled { background: var(--panel-2); color: var(--muted-2); }
+
+.laser-ansicht {
+  /* Topovo-Glas und -Knöpfe; der Grund ein dunkler Verlauf mit einem Schimmer
+     von oben wie Himmel über dem Gelände. Messlinien in --warn wie das Messmenü. */
+  position: fixed; inset: 0; z-index: 3000;
+  color: var(--text); font-size: .84rem;
+  /* Der Verlauf ist immer dunkel, auch im hellen Modus der App (so gewünscht,
+     04.11.2026): Auf Hell sah die Punktwolke flau aus. Weiß gibt es nur ausdrücklich. */
+  background: radial-gradient(ellipse 120% 80% at 50% 0%, #182434 0%, #06070b 70%);
+  /* Weil der Grund dunkel ist, auch Glas und Schrift immer wie im Dunkelmodus —
+     helles Glas über dunklem Grund wirkte grau. Die Signalfarbe bleibt die der App. */
+  color-scheme: dark;
+  --glass: rgba(18, 20, 28, .62);
+  --glass-dicht: rgba(18, 20, 28, .72);
+  --schiene-grund: rgba(6, 7, 11, .82);
+  --panel-2: rgba(255, 255, 255, .08);
+  --line: rgba(255, 255, 255, .12);
+  --text: #e9ebf1;
+  --muted: #8a90a3;
+  --muted-2: rgba(255, 255, 255, .52);
+  --warn: #ff9f0a;
+  --bg: #06070b;
+  --shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 .5px rgba(255, 255, 255, .08),
+            0 8px 24px rgba(0, 0, 0, .35);
+}
+/* Verlauf (Standard, immer dunkel); Schwarz und Weiß einfarbig, wie im PW-Viewer */
+.laser-ansicht[data-grund="schwarz"] { background: #000; }
+.laser-ansicht[data-grund="weiss"] { background: #fff; }
+.lz-flaeche { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+.lz-flaeche.zieht { cursor: grabbing; }
+.lz-knopf {
+  position: absolute; z-index: 2; width: 42px; height: 42px; padding: 0;
+  display: grid; place-items: center; cursor: pointer;
+  border: 1px solid transparent; border-radius: 50%;
+  background: var(--glass); color: var(--muted); box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+.lz-knopf svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.lz-knopf.is-on { color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--glass)); }
+.lz-messen.is-on { color: var(--warn); background: color-mix(in srgb, var(--warn) 18%, var(--glass)); }
+.lz-einst { left: var(--gap); top: calc(var(--gap) + env(safe-area-inset-top)); }
+.lz-zu { right: var(--gap); top: calc(var(--gap) + env(safe-area-inset-top)); }
+.lz-messen { left: var(--gap); bottom: calc(var(--gap) + env(safe-area-inset-bottom)); }
+.lz-heim { right: var(--gap); bottom: calc(var(--gap) + env(safe-area-inset-bottom)); }
+/* Standort über der Startansicht; an wie der Standortknopf der Karte (getöntes Glas) */
+.lz-ort { right: var(--gap); bottom: calc(var(--gap) + 52px + env(safe-area-inset-bottom)); }
+.lz-ort svg .voll { fill: currentColor; stroke: none; }
+/* Wie der Standortknopf der Karte (.maploc): Fadenkreuz, beim Suchen gestrichelter Ring */
+.lz-ort.busy svg .ring { stroke-dasharray: 6 5; }
+.lz-tafel {
+  position: absolute; z-index: 2; left: var(--gap); top: calc(var(--gap) + 50px + env(safe-area-inset-top));
+  width: min(320px, calc(100vw - 2 * var(--gap))); max-height: calc(100% - 130px); overflow: auto;
+  padding: 2px 14px 14px; border: 1px solid transparent; border-radius: var(--r);
+  background: var(--glass); box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+.lz-tafel:not([hidden]) { animation: von-oben .24s var(--auf); }
+.lz-faerbung { display: grid; grid-template-columns: 1fr 1fr; }
+.lz-klassen { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+/* Steht die letzte Klasse allein in ihrer Zeile, nimmt sie die ganze Breite — „Objekte, Bewuchs“ brach sonst um */
+.lz-klasse:last-child:nth-child(odd) { grid-column: 1 / -1; }
+/* Passt die Zahl nicht neben den Namen („Unklassifiziert“ am Desktop), rutscht sie rechtsbündig darunter */
+.lz-klasse { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 7px; min-width: 0; padding: 8px 10px; text-align: left; white-space: normal; }
+.lz-klasse .lz-name { flex: 1 0 auto; font-size: .78rem; line-height: 1.2; }
+.lz-klasse small { margin-left: auto; font-size: .66rem; opacity: .7; font-variant-numeric: tabular-nums; }
+/* Gebäude: ein Schalter über die ganze Breite, wie die Klassen gebaut */
+.lz-geb, .lz-ex-geb { width: 100%; }
+/* Export (nur in der Leiste am Desktop) */
+.lz-ex-umfang { margin: 12px 0 0; }
+.lz-ex-lauf { margin-top: 10px; }
+.lz-ex-hinweis { margin: 8px 0 0; font-size: .74rem; color: var(--muted); }
+.lz-geb.laedt { opacity: .7; }
+/* Fünf Färbungen: Luftbild allein in der letzten Zeile über die ganze Breite */
+.lz-faerbung .seg-btn:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.lz-feld { flex: none; width: 10px; height: 10px; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255, 255, 255, .5); }
+.lz-skala {
+  position: absolute; z-index: 2; left: 50%; top: calc(var(--gap) + 52px + env(safe-area-inset-top)); transform: translateX(-50%);
+  width: min(320px, calc(100vw - 130px)); padding: 9px 12px 8px;
+  border: 1px solid transparent; border-radius: var(--r-knopf);
+  background: var(--glass); box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+/* Das Messmenü wie in der App, nur links unten über dem Knopf */
+.lz-mess-menue.mess-menue {
+  position: absolute; z-index: 3; right: auto; left: var(--gap); bottom: calc(var(--gap) + 50px + env(safe-area-inset-bottom));
+  transform-origin: left bottom;
+}
+.lz-mess-menue button.is-on { background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.lz-mess-menue button:disabled { opacity: .45; cursor: default; }
+/* Die laufende Messung: Leiste wie die Werkzeuge der App, unten zwischen den Knöpfen */
+.lz-leiste {
+  position: absolute; z-index: 2; left: calc(var(--gap) + 50px); right: calc(var(--gap) + 50px);
+  bottom: calc(var(--gap) + env(safe-area-inset-bottom)); max-width: 460px; margin: 0 auto;
+  padding: 12px 14px 13px; border: 1px solid transparent; border-radius: var(--r);
+  background: var(--glass); box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+.lz-leiste:not([hidden]) { animation: von-unten .3s var(--auf); }
+.lz-leiste .bb-coord { margin-top: 6px; font-size: .86rem; }
+.lz-leiste .bb-actions { margin-top: 10px; }
+.lz-leiste .bb-actions button { padding: 10px 8px; }
+.lz-leiste .bb-actions button:disabled { opacity: .5; cursor: default; }
+.lz-leiste .bb-actions .maps:disabled { background: var(--panel-2); color: var(--muted-2); }
+.lz-marken { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.lz-marke {
+  position: absolute; left: 0; top: 0; padding: 3px 8px; border-radius: var(--r-klein);
+  background: var(--glass-dicht); color: var(--text); box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  font-size: .72rem; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.lz-marke.gross { padding: 4px 9px; font-size: .8rem; color: var(--warn); }
+/* Auflagen: Streckennummer im Ton der Achse, KML-Namen kleiner, gesuchte Stelle rot wie der Stab */
+.lz-marke.achse { color: #55a5e7; font-weight: 600; }
+.lz-marke.kml { padding: 2px 6px; font-size: .66rem; }
+.lz-marke.ziel { color: #ff453a; text-align: center; line-height: 1.3; }
+.lz-marke b { font-weight: 650; }
+.lz-fuss {
+  /* Die Quellenangabe (CC BY) oben mittig zwischen den Knöpfen — unten stehen
+     Messleiste und Hinweis (so gewünscht, 04.11.2026) */
+  position: absolute; z-index: 1; left: 64px; right: 64px; top: calc(var(--gap) + 13px + env(safe-area-inset-top));
+  margin: 0; text-align: center; font-size: .62rem; line-height: 1.4; color: var(--muted); pointer-events: none;
+}
+/* Bedienung beim Öffnen, verblasst nach einigen Sekunden */
+.lz-tipp {
+  position: absolute; z-index: 1; left: 50%; bottom: calc(var(--gap) + 4px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  width: max-content; max-width: calc(100% - 130px); margin: 0; padding: 6px 12px;
+  border-radius: var(--r-knopf); background: var(--glass); box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  font-size: .72rem; text-align: center; color: var(--text); pointer-events: none;
+  transition: opacity .6s;
+}
+.lz-tipp.weg { opacity: 0; }
+.lz-leiste:not([hidden]) ~ .lz-tipp { display: none; }
+.lz-info .fine { margin: 3px 0 0; font-size: .74rem; color: var(--muted); }
+
+/* Spalte und Leiste gibt es nur am Desktop */
+.lz-schiene, .lz-seite { display: none; }
+@media (min-width: 1010px) {
+  /* Wie Topovo ab 1010 px: Symbolspalte (64 px) und Glasleiste (320 px) links */
+  .lz-schiene {
+    position: absolute; z-index: 3; left: 0; top: 0; bottom: 0; width: 64px;
+    display: flex; flex-direction: column; gap: 4px; padding: 10px 6px;
+    background: var(--schiene-grund); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    box-shadow: inset -.5px 0 0 var(--line);
+  }
+  .lz-schiene button {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    height: 52px; flex: none; padding: 0;
+    border: 0; border-radius: var(--r-knopf); background: none; color: var(--muted); cursor: pointer;
+    font: inherit; font-size: .6rem; font-weight: 600;
+  }
+  .lz-schiene svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .lz-schiene button:hover { background: var(--panel-2); color: var(--text); }
+  .lz-schiene button.is-on { background: var(--accent); color: var(--accent-ink); }
+  /* „Karte“ oben abgesetzt wie der Werkzeugschalter in Topovo, „Ansicht“ unten */
+  .lz-schiene [data-lz="karte"] { margin-bottom: 8px; position: relative; }
+  .lz-schiene [data-lz="karte"]::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -6px; height: 1px; background: var(--line); }
+  .lz-schiene-heim { margin-top: auto; }
+  .lz-seite {
+    display: block; position: absolute; z-index: 2; left: 64px; top: 0; bottom: 0; width: 320px;
+    padding: 14px 16px 20px; overflow: auto;
+    background: var(--glass-dicht); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    box-shadow: inset -.5px 0 0 var(--line), 8px 0 24px rgba(0, 0, 0, .18);
+    transition: transform .3s var(--auf), opacity .3s var(--auf);
+  }
+  .seite-zu .lz-seite { transform: translateX(-100%); opacity: 0; pointer-events: none; }
+  .lz-seite-kopf { padding: 2px 0 12px; border-bottom: 1px solid var(--line); }
+  .lz-seite-kopf .bb-sub { margin-top: 3px; }
+  .lz-seite-titel { margin: 14px 0 4px; font-size: .74rem; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  /* Was am Handy schwebt, steht hier flach in der Leiste */
+  .lz-seite .lz-tafel, .lz-seite .lz-mess-menue.mess-menue, .lz-seite .lz-leiste {
+    position: static; width: auto; max-width: none; max-height: none; margin: 0; padding: 0;
+    background: none; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+    border-radius: 0; animation: none; overflow: visible;
+  }
+  /* Topovo blendet .mess-menue am Desktop aus (dort Werkzeugleiste) — hier gebraucht */
+  .lz-seite .lz-mess-menue.mess-menue { display: block; margin: 4px -16px 0; }
+  .lz-seite .lz-mess-menue.mess-menue[hidden] { display: none; }
+  .lz-seite .lz-mess-menue button { padding: 10px 16px; }
+  .lz-seite .lz-leiste { margin-top: 12px; padding: 12px 14px 13px; border-radius: var(--r); background: var(--panel-2); position: relative; left: auto; right: auto; bottom: auto; }
+  /* Die runden Knöpfe der Ecken übernimmt die Spalte */
+  .lz-einst, .lz-messen, .lz-heim, .lz-zu { display: none; }
+  /* Standort wie in Topovo oben rechts, nicht in der Spalte */
+  .lz-ort { top: 16px; right: 16px; bottom: auto; }
+  /* Fußzeile, Hinweis und Farbskala in der Mitte der freien Fläche */
+  .lz-fuss { left: calc(384px + 16px); right: 74px; top: 16px; }
+  .lz-tipp { left: calc(50% + 192px); max-width: calc(100% - 440px); }
+  .lz-skala { left: calc(50% + 192px); }
+  .seite-zu .lz-fuss { left: calc(64px + 16px); }
+  .seite-zu .lz-tipp, .seite-zu .lz-skala { left: calc(50% + 32px); }
+}
+
+/* Handy quer: Eine offene Leiste nimmt fast die ganze Höhe, die Säule darüber
+   rutschte unter die Suchzeile. Dann wie auf großen Bildschirmen ins Eck unten rechts, und die
+   Leisten lassen beidseits Platz für sie (mittig bleibt mittig). Am Dateiende,
+   damit es die Breiten der einzelnen Leisten überstimmt. */
+@media (orientation: landscape) and (max-height: 500px) and (max-width: 1009px) {
+  :root { --saeule: var(--gap); --grund: 6px; }
+  .bar, .quellen, .live, .radar, .sheet { width: min(640px, calc(100% - 2 * (42px + 2 * var(--gap)))); }
+  /* Das Messmenü steht wie dort über einer offenen Leiste */
+  .mess-menue { z-index: 510; }
+  /* Datenhinweis und Tour-Angebot breiter und dafür niedriger — 300 px breit
+     reichten sie über dem ©-Kasten bis über die Suchzeile */
+  .tour-angebot { width: min(560px, calc(100vw - 2 * (42px + 2 * var(--gap)))); }
+}

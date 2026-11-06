@@ -3,7 +3,7 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ehuEw+6fT//ZSoStFJ4u8wQMWqZ3awRvJK9KpFvg/Ho='; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://pwviewer-daten.steidl-michael2000.workers.dev; connect-src 'self' https://pwviewer-daten.steidl-michael2000.workers.dev; base-uri 'self'; form-action 'none'">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-L/rp4pCeZR1XkegkhorAP0UJPhGvc73MW3vlJ1eZPeE='; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://pwviewer-daten.steidl-michael2000.workers.dev; connect-src 'self' https://pwviewer-daten.steidl-michael2000.workers.dev; base-uri 'self'; form-action 'none'">
 	<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 	<meta http-equiv="Pragma" content="no-cache">
 	<meta http-equiv="Expires" content="0">
@@ -487,7 +487,14 @@
 		// Reichert einen Eintrag mit Punktzahl + Datum an (für Anzeige und Sortierung).
 		async function enrich(pc) {
 			let points = pc.points, dateRaw = pc.date, bbox = null;
-			if (points == null || !dateRaw) {
+			// Neue Projekte: eine cloud.laz statt Potree, Punktzahl steht in pointclouds.json
+			if (pc.laz && !dateRaw) {
+				try {
+					const r = await fetch(R2_BASE + "/" + encodeURIComponent(pc.name) + "/cloud.laz?nocache=" + Date.now(), { method: "HEAD" });
+					if (r.ok) dateRaw = r.headers.get("last-modified");
+				} catch (e) {}
+			}
+			if (!pc.laz && (points == null || !dateRaw)) {
 				try {
 					const r = await fetch(R2_BASE + "/" + encodeURIComponent(pc.name) + "/metadata.json?nocache=" + Date.now());
 					if (r.ok) {
@@ -532,7 +539,7 @@
 			div.className = "card";
 			const enc = encodeURIComponent(pc.name);
 			const hasPc = pc.pointcloud !== false;
-			const pcBtn = '<a class="vbtn ghost" href="' + VIEW_BASE + 'view.html?p=' + enc + '">' + POINTS_ICON + 'Punktwolke</a>';
+			const pcBtn = '<a class="vbtn ghost" href="' + VIEW_BASE + (pc.laz ? 'wolke.html' : 'view.html') + '?p=' + enc + '">' + POINTS_ICON + 'Punktwolke</a>';
 			const mdBtn = '<a class="vbtn primary" href="' + VIEW_BASE + 'model.html?p=' + enc + '">' + CUBE_ICON + '3D-Modell</a>';
 			let btns;
 			if (pc.model && hasPc) {

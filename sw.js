@@ -24,7 +24,7 @@
    wuerden die Nachbar-Apps auf derselben Domain ihren Bestand verlieren.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const VERSION = 'v4';
+const VERSION = 'v5';
 const CACHE = `pwviewer-${VERSION}`;
 
 const SHELL = [

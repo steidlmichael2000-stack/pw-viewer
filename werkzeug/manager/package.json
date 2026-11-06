@@ -1,0 +1,9 @@
+{
+  "name": "pw-viewer-manager",
+  "private": true,
+  "description": "Werkzeuge für die 3D-Modelle (OBJ → GLB). Versionen laufen ab Node 18.",
+  "dependencies": {
+    "obj2gltf": "3.2.0",
+    "@gltf-transform/cli": "3.10.1"
+  }
+}

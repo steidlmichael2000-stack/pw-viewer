@@ -9,3 +9,9 @@ Thumbs.db
 *credentials*
 *.key
 rclone.conf
+
+# Wolken und Modelle zum Ansehen vor dem Hochladen (wolke.js fragt sie auf localhost zuerst)
+daten-lokal/
+werkzeug/manager/node_modules/
+werkzeug/manager/.venv/
+__pycache__/

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="de" style="--accent:#55a5e7;--accent-ink:#06070b">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+	<!-- Ohne Inline-Skript: alles in wolke.js. wasm-unsafe-eval nur für laz-perf. -->
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://pwviewer-daten.steidl-michael2000.workers.dev; worker-src 'self'; base-uri 'self'; form-action 'none'">
+	<meta name="color-scheme" content="dark">
+	<title>Punktwolke</title>
+	<link rel="icon" href="logo.svg" type="image/svg+xml">
+	<!-- Aussehen des 3D-Viewers kommt aus Topovo (topovo/style.css, siehe werkzeug/topovo-holen.sh) -->
+	<link rel="stylesheet" href="topovo/style.css">
+	<link rel="stylesheet" href="wolke.css">
+</head>
+<body>
+	<main class="wl-laden" aria-live="polite">
+		<p class="wl-titel"></p>
+		<div class="laser-lade"><div class="laser-lade-balken"></div></div>
+		<p class="wl-stand">Punktwolke wird geladen …</p>
+		<div class="wl-knoepfe">
+			<button type="button" class="seg-btn wl-abbrechen">Abbrechen</button>
+			<a class="seg-btn wl-zurueck" href="./" hidden>Zur Übersicht</a>
+		</div>
+	</main>
+	<script type="module" src="wolke.js"></script>
+</body>
+</html>

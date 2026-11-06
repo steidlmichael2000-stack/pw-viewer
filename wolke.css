@@ -1,0 +1,17 @@
+/* PW-Viewer, Ladeschirm vor dem 3D-Viewer (der selbst kommt aus topovo/style.css).
+   Dunkel wie der Viewer, damit beim Übergang nichts aufblitzt. */
+body {
+  background: radial-gradient(ellipse 120% 80% at 50% 0%, #182434 0%, #06070b 70%);
+  color: #e9ebf1;
+  --panel-2: rgba(255, 255, 255, .08);
+  --text: #e9ebf1;
+  --muted: #8a90a3;
+}
+.wl-laden {
+  position: fixed; inset: 0; display: flex; flex-direction: column; justify-content: center;
+  width: min(360px, calc(100% - 32px)); margin: 0 auto; gap: 4px;
+}
+.wl-titel { margin: 0 0 6px; font-size: 1.15rem; font-weight: 600; }
+.wl-stand { margin: 8px 0 0; color: var(--muted); font-size: .84rem; font-variant-numeric: tabular-nums; }
+.wl-knoepfe { display: flex; gap: 8px; margin-top: 14px; }
+.wl-knoepfe .seg-btn { flex: 0 0 auto; text-decoration: none; }
