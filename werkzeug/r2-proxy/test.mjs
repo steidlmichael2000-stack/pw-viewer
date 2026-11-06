@@ -65,6 +65,8 @@ assert.match(r.headers.get('access-control-allow-headers'), /Content-Type/);
 
 assert.equal((await frage('/geckenheim/octree.bin', { headers: { Origin: 'https://boese.example' } })).status, 403);
 assert.equal((await frage('/geckenheim/model.glb')).status, 404);
+assert.equal((await frage('/geckenheim/cloud.laz')).status, 404);   // erlaubt, liegt aber nicht da
+assert.equal((await frage('/geckenheim/cloud.las')).status, 404);
 assert.equal((await frage('/geckenheim/../geheim.txt')).status, 404);
 assert.equal((await frage('/')).status, 404);
 assert.equal((await frage('/geckenheim/octree.bin', { method: 'PUT', body: 'x' })).status, 405);

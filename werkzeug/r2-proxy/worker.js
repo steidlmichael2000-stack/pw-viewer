@@ -26,6 +26,7 @@
      GET /geckenheim/metadata.json      Potree 2: Kopfdaten
      GET /geckenheim/hierarchy.bin      Potree 2: Baumstruktur (Bytebereiche)
      GET /geckenheim/octree.bin         Potree 2: Punkte (Bytebereiche)
+     GET /geckenheim/cloud.laz          Punktwolke am Stueck fuer wolke.html (seit 06.11.2026)
      GET /geckenheim/model.glb          3D-Modell fuer model.html
      GET /geckenheim/thumb.jpg          Vorschaubild, auch fuer og:image
 
@@ -39,7 +40,7 @@
      node werkzeug/r2-proxy/test.mjs
    ═══════════════════════════════════════════════════════════════════════ */
 
-const PFAD = /^\/([a-z0-9_-]{1,100})\/(metadata\.json|hierarchy\.bin|octree\.bin|model\.glb|thumb\.jpg)$/;
+const PFAD = /^\/([a-z0-9_-]{1,100})\/(metadata\.json|hierarchy\.bin|octree\.bin|cloud\.laz|model\.glb|thumb\.jpg)$/;
 const BEREICH = /^bytes=(\d+)-(\d*)$|^bytes=-(\d+)$/;
 
 const HERKUNFT = ['https://steidlmichael2000-stack.github.io'];
@@ -48,6 +49,7 @@ const LOKAL = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 const TYP = {
   json: 'application/json',
   bin: 'application/octet-stream',
+  laz: 'application/octet-stream',
   glb: 'model/gltf-binary',
   jpg: 'image/jpeg'
 };
