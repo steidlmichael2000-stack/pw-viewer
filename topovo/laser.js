@@ -38,9 +38,11 @@ const PUNKT_VS = `
   uniform float groesse, skala, masken[32], licht, ortho, orthoSkala, maxPx;
   uniform vec3 lichtRichtung;
   varying vec3 vFarbe;
+  varying float vMvZ, vWeltR;
   void main() {
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * mv;
+    vMvZ = mv.z;
     // Schummerung wie beim Relief: Licht von Nordwesten, 45° hoch
     float hell = 0.25 + 0.95 * max(dot(normalize(normale), lichtRichtung), 0.0);
     vFarbe = min(farbe * mix(1.0, hell, licht), vec3(1.0));
@@ -49,13 +51,30 @@ const PUNKT_VS = `
     // Perspektive: kleiner mit der Entfernung; orthografisch: fest je Meter
     // Ganz nah heran nicht zu Scheiben aufblähen: höchstens 24 Bildpunkte (am Handy mal Pixeldichte)
     gl_PointSize = clamp(ortho > 0.5 ? groesse * orthoSkala : groesse * skala / -mv.z, 1.5, maxPx);
+    // Halbmesser des Punktes in Metern, für die Kugeln
+    vWeltR = 0.5 * gl_PointSize / (ortho > 0.5 ? orthoSkala : skala / -mv.z);
   }`;
 const PUNKT_FS = `
+  uniform mat4 projectionMatrix;
   varying vec3 vFarbe;
+  varying float vMvZ, vWeltR;
   void main() {
     // Runde Punkte
     vec2 p = gl_PointCoord * 2.0 - 1.0;
-    if (dot(p, p) > 1.0) discard;
+    float r2 = dot(p, p);
+    if (r2 > 1.0) discard;
+  #ifdef KUGELN
+    {
+      /* „Kugeln“ (wie Potree „High Quality“): jeder Punkt eine Halbkugel zur
+       * Kamera hin — zum Rand dunkler und in der Tiefe gewölbt, so schneiden sich
+       * Nachbarn und die Fläche wirkt geschlossen. */
+      float w = sqrt(1.0 - r2);
+      vec4 c = projectionMatrix * vec4(0.0, 0.0, vMvZ + vWeltR * w, 1.0);
+      gl_FragDepthEXT = c.z / c.w * 0.5 + 0.5;
+      gl_FragColor = vec4(vFarbe * (0.45 + 0.55 * w), 1.0);
+      return;
+    }
+  #endif
     gl_FragColor = vec4(vFarbe, 1.0);
   }`;
 /* Eye-Dome-Lighting nach Boucheny (2009), wie in Potree: je Bildpunkt die
@@ -72,7 +91,7 @@ const EDL_FS = `
   precision highp int;
   uniform highp sampler2D farbe, tiefe;
   uniform ivec2 groesse;
-  uniform float nah, fern, staerke, schwelle, ortho;
+  uniform float nah, fern, staerke, schwelle, ortho, verdeckung, pr;
   uniform int radius;
   // Lineare Tiefe in m; 0 = kein Punkt
   float tiefeM(ivec2 p) {
@@ -110,6 +129,21 @@ const EDL_FS = `
       if (n != 0.0) summe += max(0.0, l - log2(n + schwelle));
     }
     float schatten = exp(-summe / 8.0 * 300.0 * staerke);
+    if (verdeckung > 0.5) {
+      /* „Verdeckung“ (Screen-Space Ambient Occlusion, vereinfacht): 24
+       * Nachbarn auf einer Spirale bis 18 Bildpunkte weit. Liegen sie vor dem
+       * Punkt, wird er dunkler — Mulden, Böschungsfüße, Hauswände am Boden.
+       * Was viel weiter vorn liegt (Baum über der Straße), zählt nur wenig. */
+      float verdeckt = 0.0;
+      for (int i = 0; i < 24; i++) {
+        float a = float(i) * 2.39996, rr = (1.5 + 16.5 * float(i + 1) / 24.0) * pr;
+        float n = tiefeM(p + ivec2(round(vec2(cos(a), sin(a)) * rr)));
+        if (n == 0.0) continue;
+        float dz = z - n, nahe = z * 0.004 + 0.03;
+        if (dz > nahe) verdeckt += clamp((dz - nahe) / (z * 0.02 + 0.2), 0.0, 1.0) * (1.0 - smoothstep(z * 0.04, z * 0.12, dz));
+      }
+      schatten *= 1.0 - 0.75 * verdeckt / 24.0;
+    }
     gl_FragColor = vec4(texelFetch(farbe, p, 0).rgb * schatten, 1.0);
   }`;
 const EDL_VS = `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
@@ -142,6 +176,9 @@ const GEB_FS = `
  * App), Ziel der Suche rot wie ein Kartenpin — Orange trägt schon das Messen. */
 const ACHS_FARBE = '#55a5e7';
 const ZIEL_FARBE = '#ff453a';
+/* Straßen (OpenFreeMap/OSM): Haupt-, Nebenstraßen, Wege — warmes Gelb wie die
+ * Straßen auf Karten, abgestuft; Blau trägt die Bahn, Weiß die Höhenlinien. */
+const STR_FARBEN = ['#f5d76e', '#e9dfb4', '#cfc6a3'];
 const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 // Boden im Sinne der BVV: Boden, Gewässer, abgeleiteter Boden (wie in laser-werk.js)
 const BODEN = new Set([2, 9, 23, 24]);
@@ -182,6 +219,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
         <div class="seg seg-paar" role="group" aria-label="Punkte">
           <button type="button" class="seg-btn is-on" data-ex-boden="0">Alle</button>
           <button type="button" class="seg-btn" data-ex-boden="1">Nur Boden</button>
+          <button type="button" class="seg-btn" data-ex-boden="2" title="Zwei LAS: Boden und alles andere — in ReCap zwei Scans">Boden + Rest</button>
         </div>
         <p class="pal-label">Farbe</p>
         <div class="seg seg-paar" role="group" aria-label="Farbe">
@@ -219,52 +257,75 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 4.5l8 7"/><path d="M6.5 9.5V19h11V9.5"/></svg>
     </button>
     <div class="lz-tafel" hidden>
-      <p class="pal-label">Färbung</p>
-      <div class="seg seg-paar lz-faerbung" role="group" aria-label="Färbung">
-        <button type="button" class="seg-btn" data-faerbung="rgb">Farbe</button>
-        <button type="button" class="seg-btn is-on" data-faerbung="klasse">Klasse</button>
-        <button type="button" class="seg-btn" data-faerbung="hoehe">Höhe</button>
-        <button type="button" class="seg-btn" data-faerbung="intensitaet">Intensität</button>
-        <button type="button" class="seg-btn" data-faerbung="normalen">Normalen</button>
-        <button type="button" class="seg-btn" data-faerbung="luftbild">Luftbild</button>
-      </div>
-      <p class="pal-label lz-klassen-titel">Klassen</p>
-      <div class="lz-klassen"></div>
-      <p class="pal-label lz-geb-titel">Gebäude</p>
-      <button type="button" class="seg-btn lz-klasse lz-geb" aria-pressed="false">
-        <span class="lz-feld" style="background:#e4e7ec"></span><span class="lz-name">3D-Gebäudemodell LoD2</span><small></small></button>
-      <p class="pal-label lz-aufl-titel">Auflagen</p>
-      <div class="lz-klassen lz-aufl">
-        <button type="button" class="seg-btn lz-klasse lz-achsen" aria-pressed="false">
-          <span class="lz-feld" style="background:${ACHS_FARBE}"></span><span class="lz-name">Streckenachsen</span><small></small></button>
-        <button type="button" class="seg-btn lz-klasse lz-kml" aria-pressed="false" hidden>
-          <span class="lz-feld" style="background:#ffffff"></span><span class="lz-name">KML</span><small></small></button>
-      </div>
-      <label class="slider-row">Schatten
-        <input type="range" class="lz-licht" min="0" max="100" step="5" value="50">
-        <span class="slider-val lz-licht-wert"></span>
-      </label>
-      <label class="slider-row">Kanten
-        <input type="range" class="lz-edl" min="0" max="100" step="5" value="40">
-        <span class="slider-val lz-edl-wert"></span>
-      </label>
-      <label class="slider-row">Punkte
+      <!-- Oben fest die Punktgröße, darunter Abschnitte zum Aufklappen wie im Menü
+           der Karte (.sheet-sec) — die Tafel wurde sonst zu lang. -->
+      <label class="slider-row lz-oben">Punktgröße
         <input type="range" class="lz-groesse" min="5" max="150" step="5" value="25">
         <span class="slider-val lz-groesse-wert"></span>
       </label>
-      <p class="pal-label">Kamera</p>
-      <div class="seg seg-paar" role="group" aria-label="Kamera">
-        <button type="button" class="seg-btn is-on" data-kamera="perspektive">Perspektive</button>
-        <button type="button" class="seg-btn" data-kamera="ortho">Orthografisch</button>
-      </div>
-      <p class="pal-label">Hintergrund</p>
-      <div class="seg seg-paar" role="group" aria-label="Hintergrund">
-        <button type="button" class="seg-btn is-on" data-grund="verlauf">Verlauf</button>
-        <button type="button" class="seg-btn" data-grund="schwarz">Schwarz</button>
-        <button type="button" class="seg-btn" data-grund="weiss">Weiß</button>
-      </div>
-      <p class="pal-label">Ausschnitt</p>
-      <div class="lz-info"></div>
+      <details class="sheet-sec" open>
+        <summary><h2>Färbung</h2></summary>
+        <div class="seg seg-paar lz-faerbung" role="group" aria-label="Färbung">
+          <button type="button" class="seg-btn" data-faerbung="rgb">Farbe</button>
+          <button type="button" class="seg-btn is-on" data-faerbung="klasse">Klasse</button>
+          <button type="button" class="seg-btn" data-faerbung="hoehe">Höhe</button>
+          <button type="button" class="seg-btn" data-faerbung="intensitaet">Intensität</button>
+          <button type="button" class="seg-btn" data-faerbung="normalen">Normalen</button>
+          <button type="button" class="seg-btn" data-faerbung="neigung">Neigung</button>
+          <button type="button" class="seg-btn" data-faerbung="luftbild">Luftbild</button>
+        </div>
+      </details>
+      <details class="sheet-sec">
+        <summary><h2>Effekte</h2></summary>
+        <label class="slider-row">Schatten
+          <input type="range" class="lz-licht" min="0" max="100" step="5" value="50">
+          <span class="slider-val lz-licht-wert"></span>
+        </label>
+        <label class="slider-row">Kanten
+          <input type="range" class="lz-edl" min="0" max="100" step="5" value="40">
+          <span class="slider-val lz-edl-wert"></span>
+        </label>
+        <div class="lz-klassen lz-effekte">
+          <button type="button" class="seg-btn lz-klasse" data-effekt="verdeckung" aria-pressed="false"><span class="lz-name">Verdeckung</span><small>aus</small></button>
+          <button type="button" class="seg-btn lz-klasse" data-effekt="kugeln" aria-pressed="false"><span class="lz-name">Kugeln</span><small>aus</small></button>
+          <button type="button" class="seg-btn lz-klasse" data-effekt="linien" aria-pressed="false"><span class="lz-name">Höhenlinien</span><small>aus</small></button>
+        </div>
+      </details>
+      <details class="sheet-sec lz-klassen-titel" open>
+        <summary><h2>Klassen</h2></summary>
+        <div class="lz-klassen lz-klassenliste"></div>
+      </details>
+      <details class="sheet-sec lz-aufl-titel">
+        <summary><h2>Auflagen</h2></summary>
+        <div class="lz-klassen lz-aufl">
+          <button type="button" class="seg-btn lz-klasse lz-geb" aria-pressed="false">
+            <span class="lz-feld" style="background:#e4e7ec"></span><span class="lz-name">3D-Gebäudemodell LoD2</span><small></small></button>
+          <button type="button" class="seg-btn lz-klasse lz-achsen" aria-pressed="false">
+            <span class="lz-feld" style="background:${ACHS_FARBE}"></span><span class="lz-name">Streckenachsen</span><small></small></button>
+          <button type="button" class="seg-btn lz-klasse lz-strassen" aria-pressed="false">
+            <span class="lz-feld" style="background:${STR_FARBEN[0]}"></span><span class="lz-name">Straßen</span><small>aus</small></button>
+          <button type="button" class="seg-btn lz-klasse lz-kml" aria-pressed="false" hidden>
+            <span class="lz-feld" style="background:#ffffff"></span><span class="lz-name">KML</span><small></small></button>
+        </div>
+      </details>
+      <details class="sheet-sec">
+        <summary><h2>Ansicht</h2></summary>
+        <p class="pal-label">Kamera</p>
+        <div class="seg seg-paar" role="group" aria-label="Kamera">
+          <button type="button" class="seg-btn is-on" data-kamera="perspektive">Perspektive</button>
+          <button type="button" class="seg-btn" data-kamera="ortho">Orthografisch</button>
+        </div>
+        <p class="pal-label">Hintergrund</p>
+        <div class="seg seg-paar" role="group" aria-label="Hintergrund">
+          <button type="button" class="seg-btn is-on" data-grund="verlauf">Verlauf</button>
+          <button type="button" class="seg-btn" data-grund="schwarz">Schwarz</button>
+          <button type="button" class="seg-btn" data-grund="weiss">Weiß</button>
+        </div>
+      </details>
+      <details class="sheet-sec">
+        <summary><h2>Ausschnitt</h2></summary>
+        <div class="lz-info"></div>
+      </details>
     </div>
     <div class="lz-skala" hidden><div class="hoehen-balken"></div><div class="hoehen-werte"><span></span><span></span><span></span></div></div>
     <div class="lz-mess-menue mess-menue" role="menu" aria-label="Messen" hidden>
@@ -310,13 +371,25 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   if (!d.rgb) weg('[data-faerbung="rgb"]');
   if (!d.iMax) weg('[data-faerbung="intensitaet"]');
   // Drohnenwolken ohne Klassen (alles Klasse 0): Farbe statt einer einzigen Klassenfarbe
-  if (d.rgb && d.klassen.length < 2) weg('[data-faerbung="klasse"], .lz-klassen-titel, .lz-klassen:not(.lz-aufl)');
+  if (d.rgb && d.klassen.length < 2) weg('[data-faerbung="klasse"], .lz-klassen-titel');
   if (!info.luftbild) weg('[data-faerbung="luftbild"]');
-  if (!info.gebaeude) weg('.lz-geb, .lz-geb-titel');
+  if (!info.gebaeude) weg('.lz-geb');
   if (!info.achsen) weg('.lz-achsen');
-  if (!info.achsen && !info.kml) weg('.lz-aufl, .lz-aufl-titel');
+  if (!info.strassen) weg('.lz-strassen');
+  if (!info.gebaeude && !info.achsen && !info.kml && !info.strassen) weg('.lz-aufl-titel');
   if (!info.exportieren) weg('[data-lz="export"], [data-bereich="export"]');
   if (!info.utm) weg('.lz-ort');
+  // Höhenlinien kommen aus den Bodenpunkten — Drohnenwolken (PW-Viewer) haben keine
+  if (!d.klassen.some(([k]) => BODEN.has(k))) weg('[data-effekt="linien"]');
+  /* In den Rastern zu zwei Spalten nimmt ein allein stehender letzter Knopf die
+   * ganze Breite. Nach den sichtbaren gezählt — :nth-child zählt ausgeblendete
+   * mit, dann stand „Neigung“ allein und „Luftbild“ breit darunter. */
+  const breitSetzen = () => wurzel.querySelectorAll('.lz-faerbung, .lz-klassen').forEach(g => {
+    const da = [...g.children].filter(el => !el.hidden && !el.classList.contains('lz-geb'));
+    g.querySelectorAll('.breit').forEach(el => el.classList.remove('breit'));
+    if (da.length % 2) da[da.length - 1].classList.add('breit');
+  });
+  breitSetzen();
   $('.lz-seite-titel-text').textContent = info.titel || 'Laserpunkte';
   if (info.zurueck) $('[data-lz="karte"]').setAttribute('aria-label', info.zurueck);
 
@@ -382,7 +455,8 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   const edl = new THREE.ShaderMaterial({
     vertexShader: EDL_VS, fragmentShader: EDL_FS, depthTest: false, depthWrite: false, transparent: true,
     uniforms: { farbe: { value: ziel.texture }, tiefe: { value: ziel.depthTexture }, groesse: { value: [1, 1] },
-      nah: { value: kamera.near }, fern: { value: kamera.far }, staerke: { value: 0.4 }, radius: { value: 1 }, schwelle: { value: 0.05 }, ortho: { value: 0 } }
+      nah: { value: kamera.near }, fern: { value: kamera.far }, staerke: { value: 0.4 }, radius: { value: 1 }, schwelle: { value: 0.05 }, ortho: { value: 0 },
+      verdeckung: { value: 0 }, pr: { value: 1 } }
   });
   const schirm = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), edl);
   const schirmSzene = new THREE.Scene();
@@ -474,6 +548,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   const zSort = Float32Array.from({ length: Math.min(n, 200000) }, (_, i) => d.xyz[3 * Math.floor(i * n / Math.min(n, 200000)) + 2]).sort();
   const zLo = zSort[Math.floor(zSort.length * 0.01)] || 0, zHi = zSort[Math.floor(zSort.length * 0.99)] || hoch;
   const rampe = RAMPE.map(f => new THREE.Color(f));
+  const NEIG = [new THREE.Color(0.35, 0.68, 0.38), new THREE.Color(0.95, 0.85, 0.3), new THREE.Color(0.86, 0.2, 0.15)];
   const klassenFarben = new Map(d.klassen.map(([k]) => [k, new THREE.Color(klasseFarbe(k))]));
 
   function faerben() {
@@ -490,6 +565,12 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
         const t = Math.min(1, Math.max(0, (d.xyz[3 * i + 2] - zLo) / (zHi - zLo || 1))) * (rampe.length - 1);
         const j = Math.min(rampe.length - 2, Math.floor(t));
         c = tmp.copy(rampe[j]).lerp(rampe[j + 1], t - j);
+      } else if (faerbung === 'neigung') {
+        // Neigung der Normalen: 0° grün, 20° gelb, 45° und steiler rot
+        const a = geo.attributes.normale.array, nx = a[3 * i], ny = a[3 * i + 1], nz = a[3 * i + 2];
+        const grad = Math.acos(Math.min(1, Math.abs(nz) / (Math.hypot(nx, ny, nz) || 1))) * 180 / Math.PI;
+        const t = Math.min(1, grad / 45);
+        c = t < 0.5 ? tmp.copy(NEIG[0]).lerp(NEIG[1], t * 2) : tmp.copy(NEIG[1]).lerp(NEIG[2], t * 2 - 1);
       } else if (faerbung === 'normalen') {
         /* Grau, das Licht macht die Form — wie das Schräglicht der BVV. Die
          * Richtung als Farbe (CloudCompare) war fast überall lila: Fast alles
@@ -516,10 +597,12 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
 
   /* ---------- Klassen ein/aus ---------- */
   // Als Knöpfe wie die Auflagen in Topovo: gefüllt = an, das Farbfeld davor wie bei den Parzellen
-  $('.lz-klassen').innerHTML = d.klassen.map(([k, anzahl]) => `
+  const klassenListe = $('.lz-klassenliste');
+  if (klassenListe) klassenListe.innerHTML = d.klassen.map(([k, anzahl]) => `
     <button type="button" class="seg-btn is-on lz-klasse" data-klasse="${k}" aria-pressed="true">
       <span class="lz-feld" style="background:${klasseFarbe(k)}"></span><span class="lz-name">${klasseName(k)}</span>
       <small>${anzahl.toLocaleString('de-DE')}</small></button>`).join('');
+  breitSetzen();
   wurzel.querySelectorAll('[data-klasse]').forEach(b => b.addEventListener('click', () => {
     const an = !b.classList.contains('is-on');
     b.classList.toggle('is-on', an);
@@ -540,7 +623,8 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   const quellenNeu = () => {
     const was = [info.datenName || 'Laserdaten', luftbild && 'Luftbild', geb && 'Gebäude LoD2'].filter(Boolean);
     $('.lz-fuss').textContent = `${was.join(', ').replace(/, ([^,]*)$/, ' und $1')}: ${info.quelle}` +
-      (achsen && achsen.anzahl ? ' · Streckenachsen: DB InfraGO (CC BY 4.0), bearbeitet' : '');
+      (achsen && achsen.anzahl ? ' · Streckenachsen: DB InfraGO (CC BY 4.0), bearbeitet' : '') +
+      (strassen && strassen.gruppe.visible ? ' · Straßen: OpenFreeMap, © OpenStreetMap' : '');
   };
 
   /* ---------- Färbung nach Luftbild ----------
@@ -663,6 +747,102 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     if (Math.abs(det) < 1e-9 * m * m * m) return null;
     const a = (sz * (sxx * syy - sxy * sxy) - sx * (sxz * syy - sxy * syz) + sy * (sxz * sxy - sxx * syz)) / det;
     return Math.min(hi, Math.max(lo, a));
+  }
+
+  /* ---------- Höhenlinien ----------
+   * Aus den Bodenpunkten (BODEN): je Zelle (1 m, über 400 m Seite 2 m) das
+   * Mittel, Lücken (Häuser, dichter Wald) aus den Nachbarn gefüllt, dann leicht
+   * geglättet und per Marching Squares zu Linien. Gezeichnet nach dem Bild der
+   * Punkte, verdeckt von Hand gegen deren Tiefe wie die Gebäude (GEB_FS, 0,3 m
+   * Spielraum) — sonst lägen sie halb unter den Bodenpunkten. Fünfte Linie kräftiger. */
+  const linienSzene = new THREE.Scene();
+  const linienMat = new THREE.ShaderMaterial({ vertexShader: GEB_VS, fragmentShader: GEB_FS, transparent: true, depthTest: false,
+    uniforms: { ...gebUniforms(), kante: { value: 1 }, deckung: { value: 0.35 }, farbe: { value: new THREE.Color(1, 1, 1) } } });
+  const linienHauptMat = new THREE.ShaderMaterial({ vertexShader: GEB_VS, fragmentShader: GEB_FS, transparent: true, depthTest: false,
+    uniforms: { ...gebUniforms(), kante: { value: 1 }, deckung: { value: 0.75 }, farbe: { value: new THREE.Color(1, 1, 1) } } });
+  let linienAbst = 0, linienGebaut = false;
+  function hoehenlinienText() { return `${zahl(linienAbst || 1, linienAbst < 1 ? 1 : 0)} m`; }
+  function hoehenlinienZeigen(an) {
+    if (an && !linienGebaut) { linienGebaut = true; hoehenlinienBauen(); }
+    linienSzene.visible = an;
+  }
+  function hoehenlinienBauen() {
+    const res = info.seite > 400 ? 2 : 1, m = Math.ceil(info.seite / res) + 1;
+    const summe = new Float64Array(m * m), zahlN = new Uint32Array(m * m);
+    for (let i = 0; i < n; i++) {
+      if (!BODEN.has(d.klasse[i])) continue;
+      const cx = Math.round((d.xyz[3 * i] + halb) / res), cy = Math.round((d.xyz[3 * i + 1] + halb) / res);
+      if (cx < 0 || cy < 0 || cx >= m || cy >= m) continue;
+      summe[cy * m + cx] += d.xyz[3 * i + 2]; zahlN[cy * m + cx]++;
+    }
+    let z = new Float32Array(m * m).fill(NaN);
+    for (let k = 0; k < m * m; k++) if (zahlN[k]) z[k] = summe[k] / zahlN[k];
+    // Lücken: höchstens 12 Runden aus den belegten Nachbarn (reicht für rund 25 m breite Häuser/Wälder)
+    for (let runde = 0; runde < 12; runde++) {
+      const neuZ = z.slice();
+      let offen = 0;
+      for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
+        if (!Number.isNaN(z[y * m + x])) continue;
+        let s = 0, c = 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx, yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= m || yy >= m) continue;
+          const v = z[yy * m + xx];
+          if (!Number.isNaN(v)) { s += v; c++; }
+        }
+        if (c >= 3) neuZ[y * m + x] = s / c; else offen++;
+      }
+      z = neuZ;
+      if (!offen) break;
+    }
+    // Zweimal 3 × 3 glätten: Rauschen der Punkte würde sonst jede Linie zittern lassen
+    for (let runde = 0; runde < 2; runde++) {
+      const neuZ = z.slice();
+      for (let y = 1; y < m - 1; y++) for (let x = 1; x < m - 1; x++) {
+        let s = 0, c = 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const v = z[(y + dy) * m + x + dx];
+          if (!Number.isNaN(v)) { s += v; c++; }
+        }
+        if (!Number.isNaN(z[y * m + x])) neuZ[y * m + x] = s / c;
+      }
+      z = neuZ;
+    }
+    // Abstand nach der Spanne des Bodens: rund 20…60 Linien im Ausschnitt
+    let lo = Infinity, hi = -Infinity;
+    for (const v of z) if (!Number.isNaN(v)) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (lo === Infinity) return;
+    const spanne = hi - lo;
+    linienAbst = spanne < 8 ? 0.25 : spanne < 15 ? 0.5 : spanne < 40 ? 1 : spanne < 100 ? 2 : spanne < 250 ? 5 : 10;
+    const fein = [], haupt = [];
+    const ab = d.zMin, x0 = -halb, y0 = -halb;
+    const punkt = (xa, ya, za, xb, yb, zb, h, ziel) => {
+      const t = (h - za) / (zb - za);
+      ziel.push(x0 + (xa + (xb - xa) * t) * res, y0 + (ya + (yb - ya) * t) * res, h + 0.05);
+    };
+    for (let y = 0; y < m - 1; y++) for (let x = 0; x < m - 1; x++) {
+      const a = z[y * m + x], b = z[y * m + x + 1], c = z[(y + 1) * m + x + 1], e = z[(y + 1) * m + x];
+      if (Number.isNaN(a) || Number.isNaN(b) || Number.isNaN(c) || Number.isNaN(e)) continue;
+      const zmin = Math.min(a, b, c, e), zmax = Math.max(a, b, c, e);
+      for (let k = Math.ceil((zmin + ab) / linienAbst); k <= Math.floor((zmax + ab) / linienAbst); k++) {
+        const h = k * linienAbst - ab;
+        const ziel = ((k % 5) + 5) % 5 === 0 ? haupt : fein;
+        // Kanten des Quadrats, auf denen die Linie liegt (Ecke genau auf h zählt oben)
+        const p = [];
+        const kante = (za, zb, xa, ya, xb, yb) => { if ((za < h) !== (zb < h)) p.push([xa, ya, za, xb, yb, zb]); };
+        kante(a, b, x, y, x + 1, y); kante(b, c, x + 1, y, x + 1, y + 1); kante(c, e, x + 1, y + 1, x, y + 1); kante(e, a, x, y + 1, x, y);
+        // Zwei oder vier Schnitte; bei vier (Sattel) nach dem Mittelwert paaren
+        // Liegt die Mitte auf der Seite von a und c, trennen die Linien b und e ab (oben–rechts, unten–links), sonst a und c
+        if (p.length === 4 && ((a + b + c + e) / 4 < h) !== (a < h)) p.push(p.shift());
+        for (let j = 0; j + 1 < p.length; j += 2) { punkt(...p[j], h, ziel); punkt(...p[j + 1], h, ziel); }
+      }
+    }
+    for (const [liste, mat] of [[fein, linienMat], [haupt, linienHauptMat]]) {
+      if (!liste.length) continue;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(liste, 3));
+      linienSzene.add(new THREE.LineSegments(g, mat));
+    }
   }
 
   // Blau wie der Standort auf der Karte (.me-dot), mit weißem Rand; immer obenauf
@@ -900,8 +1080,8 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   const SCHRITT = halb > 150 ? 2 : 1;
   const ANHEBEN = 0.05;               // knapp über dem Boden, sonst flimmert sie mit den Bodenpunkten
   const auflKugeln = [];              // bleiben auf dem Schirm gleich groß (bild)
-  let achsen = null, kmlAufl = null, zielAufl = null;
-  const achsKnopf = $('.lz-achsen'), kmlKnopf = $('.lz-kml');
+  let achsen = null, kmlAufl = null, zielAufl = null, strassen = null;
+  const achsKnopf = $('.lz-achsen'), kmlKnopf = $('.lz-kml'), strKnopf = $('.lz-strassen');
 
   /** Linienzug in UTM32 → Stücke auf dem Boden (Vector3, lokal), auf den Ausschnitt beschnitten. */
   function aufBoden(pts) {
@@ -984,6 +1164,56 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     auflZeigen(achsen, achsKnopf, an, `${achsen.anzahl} ${achsen.anzahl === 1 ? 'Strecke' : 'Strecken'}`);
   });
 
+  /* Straßennetz: erst beim ersten Einschalten geholt. Haupt- und Nebenstraßen
+   * durchgezogen, Wege gestrichelt und blasser. Namen je Straße einmal, am
+   * längsten Stück, höchstens STR_NAMEN_MAX — sonst deckt Text die Wolke zu. */
+  const STR_NAMEN_MAX = 40;
+  const strMats = STR_FARBEN.map((f, i) => i < 2
+    ? new THREE.LineBasicMaterial({ color: f, depthTest: false, transparent: true, opacity: i ? 0.7 : 0.95 })
+    : new THREE.LineDashedMaterial({ color: f, depthTest: false, transparent: true, opacity: 0.6, dashSize: 1.2, gapSize: 0.8 }));
+  let strLaedt = false;
+  const strText = () => 'an';
+  async function strassenLaden() {
+    strLaedt = true;
+    strKnopf.classList.add('laedt');
+    strKnopf.querySelector('small').textContent = 'lädt …';
+    let liste = null;
+    try { liste = await info.strassen(d.mitte[0] - halb, d.mitte[1] - halb, d.mitte[0] + halb, d.mitte[1] + halb); }
+    catch (err) { console.warn(err); }
+    strLaedt = false;
+    if (!laeuft) return;
+    strKnopf.classList.remove('laedt');
+    if (!liste) { strKnopf.querySelector('small').textContent = 'aus'; hinweis('Das Straßennetz ließ sich nicht laden.'); return; }
+    const gruppe = new THREE.Group(), schilder = [];
+    let anzahl = 0;
+    for (const s of liste.strassen) {
+      for (const st of aufBoden(s.pts)) {
+        const l = auflLinie(st, strMats[s.stufe]);
+        if (s.stufe === 2) l.computeLineDistances();
+        l.renderOrder = 4;
+        gruppe.add(l);
+        anzahl++;
+      }
+    }
+    const laengste = new Map();
+    for (const nm of liste.namen) {
+      for (const st of aufBoden(nm.pts)) if (!laengste.has(nm.name) || laengste.get(nm.name).length < st.length) laengste.set(nm.name, st);
+    }
+    [...laengste].sort((a, b) => b[1].length - a[1].length).slice(0, STR_NAMEN_MAX)
+      .forEach(([name, st]) => schilder.push(schild(st[st.length >> 1], esc(name), 'strasse')));
+    auflSzene.add(gruppe);
+    strassen = { gruppe, schilder, anzahl };
+    auflZeigen(strassen, strKnopf, true, anzahl ? strText() : 'keine');
+    quellenNeu();
+    if (!anzahl) hinweis(liste.strassen.length ? 'Unter den Straßen liegen hier keine Bodenpunkte.' : 'Im Ausschnitt liegt keine Straße.');
+  }
+  if (strKnopf) strKnopf.addEventListener('click', () => {
+    if (strLaedt) return;
+    if (!strassen) { strassenLaden(); return; }
+    auflZeigen(strassen, strKnopf, !strassen.gruppe.visible, strText());
+    quellenNeu();
+  });
+
   /* KML: Punkte als Kugel in der Farbe der Datei, Linien und Flächenränder auf
    * dem Boden. Namen nur bis KML_NAMEN_MAX — sonst deckt Text die Wolke zu. */
   const KML_NAMEN_MAX = 150;
@@ -1022,6 +1252,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     kmlAufl = { gruppe, schilder, anzahl: liste.length, punkte };
     if (!liste.length) return;
     kmlKnopf.hidden = false;
+    breitSetzen();
     auflZeigen(kmlAufl, kmlKnopf, true, `${liste.length.toLocaleString('de-DE')}`);
   }
   kmlKnopf.addEventListener('click', () => {
@@ -1058,7 +1289,8 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
    * das LAZ der BVV hinaus, sonst LAS (Format 3 bzw. 7 mit Farbe). DB_REF nach
    * Ril 883.9010, Höhen bleiben DHHN2016 (= DB_REF2016). Jede Datei kommt einzeln
    * als Download, sobald sie fertig ist. */
-  const ex = { umfang: 'ausschnitt', boden: !!info.nurBoden, farbe: false, ziel: 'utm', geb: false, laeuft: false };
+  // boden: 0 alle, 1 nur Boden, 2 Boden und Rest getrennt (zwei LAS)
+  const ex = { umfang: 'ausschnitt', boden: info.nurBoden ? 1 : 0, farbe: false, ziel: 'utm', geb: false, laeuft: false };
   {
     // Vorwahl des Streifens nach der Lage: Grenze bei 10,5° O, grob aus dem UTM-Rechtswert
     const breite = d.mitte[1] / 111132 * Math.PI / 180;
@@ -1091,8 +1323,8 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
           punkte += k.anzahl * ueber / 1e6;
         }
       }
-      if (ex.boden) punkte *= bodenAnteil;
-      text = `LAS${ex.umfang === 'kacheln' && exKacheln.length > 1 ? ` aus ${exKacheln.length} Kacheln` : ''} · etwa ${zahl(punkte / 1e6, 1)} Mio. Punkte · etwa ${MB(punkte * L)}`;
+      if (ex.boden === 1) punkte *= bodenAnteil;
+      text = `${ex.boden === 2 ? '2 × ' : ''}LAS${ex.umfang === 'kacheln' && exKacheln.length > 1 ? ` aus ${exKacheln.length} Kacheln` : ''} · etwa ${zahl(punkte / 1e6, 1)} Mio. Punkte · etwa ${MB(punkte * L)}`;
     }
     $('.lz-ex-umfang').textContent = text + (ex.geb ? ' · dazu DXF' : '');
     $('.lz-ex-hinweis').textContent = [
@@ -1103,7 +1335,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   }
   function exWahlZeigen() {
     exSek.querySelectorAll('[data-ex-umfang]').forEach(b => b.classList.toggle('is-on', b.dataset.exUmfang === ex.umfang));
-    exSek.querySelectorAll('[data-ex-boden]').forEach(b => b.classList.toggle('is-on', (b.dataset.exBoden === '1') === ex.boden));
+    exSek.querySelectorAll('[data-ex-boden]').forEach(b => b.classList.toggle('is-on', Number(b.dataset.exBoden) === ex.boden));
     exSek.querySelectorAll('[data-ex-farbe]').forEach(b => b.classList.toggle('is-on', (b.dataset.exFarbe === '1') === ex.farbe));
     exSek.querySelectorAll('[data-ex-ziel]').forEach(b => b.classList.toggle('is-on', b.dataset.exZiel === ex.ziel));
     const gk = $('.lz-ex-geb');
@@ -1111,10 +1343,12 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     gk.setAttribute('aria-pressed', String(ex.geb));
     gk.querySelector('small').textContent = ex.geb ? 'an' : 'aus';
     exSek.querySelectorAll('.seg-btn').forEach(b => { b.disabled = ex.laeuft; });
+    // War die Ansicht schon „Nur Boden“, gäbe es keinen Rest
+    if (info.nurBoden) exSek.querySelector('[data-ex-boden="2"]').disabled = true;
     exUmfangZeigen();
   }
   exSek.querySelectorAll('[data-ex-umfang]').forEach(b => b.addEventListener('click', () => { ex.umfang = b.dataset.exUmfang; exWahlZeigen(); }));
-  exSek.querySelectorAll('[data-ex-boden]').forEach(b => b.addEventListener('click', () => { ex.boden = b.dataset.exBoden === '1'; exWahlZeigen(); }));
+  exSek.querySelectorAll('[data-ex-boden]').forEach(b => b.addEventListener('click', () => { ex.boden = Number(b.dataset.exBoden); exWahlZeigen(); }));
   exSek.querySelectorAll('[data-ex-farbe]').forEach(b => b.addEventListener('click', () => { ex.farbe = b.dataset.exFarbe === '1'; exWahlZeigen(); }));
   exSek.querySelectorAll('[data-ex-ziel]').forEach(b => b.addEventListener('click', () => { ex.ziel = b.dataset.exZiel; exWahlZeigen(); }));
   $('.lz-ex-geb').addEventListener('click', () => { ex.geb = !ex.geb; exWahlZeigen(); });
@@ -1163,7 +1397,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     const einzeln = ex.umfang === 'kacheln', ziel = ex.ziel === 'utm' ? 'utm' : Number(ex.ziel);
     const b = info.bereich;
     const name = einzeln ? `laser_${info.kacheln.map(k => k.kachel).join('_')}` : `laser_${Math.round(b.e0)}_${Math.round(b.n0)}_${Math.round(b.e1 - b.e0)}m`;
-    const zusatz = (ziel === 'utm' ? '_utm32' : `_dbref_gk${ziel}`) + (ex.farbe ? '_rgb' : '') + (ex.boden ? '_boden' : '');
+    const zusatz = (ziel === 'utm' ? '_utm32' : `_dbref_gk${ziel}`) + (ex.farbe ? '_rgb' : '') + (ex.boden === 1 ? '_boden' : '');
     let luftbild = null;
     if (ex.farbe) luftbild = einzeln ? Object.fromEntries(info.kacheln.map(k => { const f = kachelFlaeche(k.kachel); return [k.kachel, luftbildTeile(f.e0, f.n0, f.e1, f.n1)]; }))
       : luftbildTeile(b.e0, b.n0, b.e1, b.n1);
@@ -1186,7 +1420,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       if (!laeuft || ex.abbrechen) return exLaeuft(false);
     }
     let dateien = 0;
-    info.exportieren({ kacheln: info.kacheln, bereich: b, einzeln, nurBoden: ex.boden, ziel, luftbild, gebaeude, name, zusatz }, m => {
+    info.exportieren({ kacheln: info.kacheln, bereich: b, einzeln, nurBoden: ex.boden === 1, getrennt: ex.boden === 2, ziel, luftbild, gebaeude, name, zusatz }, m => {
       if (!laeuft) return;
       const von = m.von > 1 ? ` (Kachel ${m.nr + 1} von ${m.von})` : '';
       if (m.art === 'laden') exStand(`Laden${von} … ${MB(m.geladen)}${m.gesamt ? ` von ${MB(m.gesamt)}` : ''}`, m.gesamt ? (m.nr + m.geladen / m.gesamt) / m.von : null);
@@ -1278,6 +1512,22 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     }, err => console.warn(err));
   }
   $('.lz-heim').addEventListener('click', heim);
+  /* Effekte, frei kombinierbar */
+  const effekte = { verdeckung: false, kugeln: false, linien: false };
+  wurzel.querySelectorAll('[data-effekt]').forEach(b => b.addEventListener('click', () => {
+    const art = b.dataset.effekt, an = effekte[art] = !effekte[art];
+    b.classList.toggle('is-on', an);
+    b.setAttribute('aria-pressed', String(an));
+    if (art === 'linien') hoehenlinienZeigen(an);
+    b.querySelector('small').textContent = an ? (art === 'linien' ? hoehenlinienText() : 'an') : 'aus';
+    if (art === 'verdeckung') edl.uniforms.verdeckung.value = an ? 1 : 0;
+    if (art === 'kugeln') {
+      // Tiefe schreiben nur bei den Kugeln — sonst bleibt die frühe Tiefenprüfung der Grafikkarte an
+      material.defines = an ? { KUGELN: '' } : {};
+      material.needsUpdate = true;
+    }
+    neu = true;
+  }));
 
   /* ---------- Antippen: Punkt im Bild suchen ----------
    * Ohne Raycaster über alle Punkte der Szene: die sichtbaren Punkte auf den
@@ -1640,6 +1890,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     edl.uniforms.groesse.value = [flaecheGr.x, flaecheGr.y];   // ivec2: als Liste, nicht als Vector2
     // Bei hoher Pixeldichte (Handy) die Nachbarn zwei Bildpunkte weit: sonst wirken die Kanten haarfein
     edl.uniforms.radius.value = pr >= 2 ? 2 : 1;
+    edl.uniforms.pr.value = pr;
     material.uniforms.skala.value = h * pr / (2 * Math.tan(perspektive.fov * Math.PI / 360));
     material.uniforms.maxPx.value = 24 * pr;
     neu = true;
@@ -1691,13 +1942,14 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     renderer.render(schirmSzene, schirmKamera);
     renderer.autoClear = false;
     if (geb && geb.gruppe.visible) renderer.render(gebSzene, kamera);
+    if (effekte.linien) renderer.render(linienSzene, kamera);
     renderer.render(auflSzene, kamera);
     renderer.render(messSzene, kamera);
     renderer.autoClear = true;
     // Beschriftungen der Messungen an ihre Stelle im Bild
     const r = flaeche.getBoundingClientRect();
     const mitOrt = ortSchild && ortGruppe.visible ? [{ schilder: [ortSchild] }] : [];
-    const aufl = [achsen, kmlAufl, zielAufl].filter(a => a && a.gruppe.visible);
+    const aufl = [achsen, strassen, kmlAufl, zielAufl].filter(a => a && a.gruppe.visible);
     for (const m of [...aufl, ...messungen, ...(offen ? [offen] : []), ...mitOrt]) {
       for (const sch of m.schilder) {
         v.copy(sch.p).project(kamera);
@@ -1758,8 +2010,10 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     ortRing.geometry.dispose(); ortRingMat.dispose();
     if (geb) geb.gruppe.children.forEach(c => c.geometry.dispose());
     auflSzene.traverse(o => { if (o.geometry && o.geometry !== kugelGeo) o.geometry.dispose(); });
+    strMats.forEach(m => m.dispose());
     achsMat.dispose(); zielMat.dispose(); zielLinieMat.dispose(); kmlMats.forEach(m => m.dispose());
-    gebFlaecheMat.dispose(); gebKanteMat.dispose();
+    gebFlaecheMat.dispose(); gebKanteMat.dispose(); linienMat.dispose(); linienHauptMat.dispose();
+    linienSzene.traverse(o => { if (o.geometry) o.geometry.dispose(); });
     geo.dispose(); material.dispose(); edl.dispose(); ziel.dispose(); schirm.geometry.dispose();
     kugelGeo.dispose(); kugelMat.dispose(); linieMat.dispose(); strichMat.dispose();
     /* dispose() gibt den WebGL-Kontext nicht frei: Browser halten nur rund 16, danach

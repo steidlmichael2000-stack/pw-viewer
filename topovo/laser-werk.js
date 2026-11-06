@@ -673,9 +673,11 @@ async function luftbildHolen(f) {
   return { e0: f.e0, n1: f.n1, res: f.res, breite: f.breite, hoehe: f.hoehe, rgb };
 }
 
-/** Die Punkte der Kacheln da im Bereich b als LAS-Datei: { blob, punkte }.
- *  farbeFuer(t): das Luftbild für Kachel t (luftbildHolen), oder null ohne Farbe. */
-async function lasBauen(LP, da, b, { nurBoden, ziel, farbeFuer }) {
+/** Die Punkte der Kacheln da im Bereich b als LAS-Datei: [{ blob, punkte }].
+ *  farbeFuer(t): das Luftbild für Kachel t (luftbildHolen), oder null ohne Farbe.
+ *  getrennt: zwei Dateien in einem Durchgang — [0] Boden (BODEN), [1] der Rest.
+ *  Für ReCap: jede Datei wird dort ein eigener Scan, in Civil einzeln ausblendbar. */
+async function lasBauen(LP, da, b, { nurBoden, getrennt, ziel, farbeFuer }) {
   const neu = da.some(k => k.kopf.format >= 6);
   const mitRgb = !!farbeFuer || da.some(k => LAS_RGB[k.kopf.format] != null);
   const format = neu ? (mitRgb ? 7 : 6) : (mitRgb ? 3 : 1), L = LAS_LAENGE[format];
@@ -686,12 +688,11 @@ async function lasBauen(LP, da, b, { nurBoden, ziel, farbeFuer }) {
   const mitte = umrechnen ? umrechnen((b.e0 + b.e1) / 2, (b.n0 + b.n1) / 2, (z0 + z1) / 2, [0, 0]) : [(b.e0 + b.e1) / 2, (b.n0 + b.n1) / 2];
   const skala = da[0].kopf.skala.slice();
   const versatz = [Math.round(mitte[0] / 1000) * 1000, Math.round(mitte[1] / 1000) * 1000, 0];
-  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
-  const rueck = new Array(15).fill(0);
   // In Stücken zu rund 8 MB als Blob gesammelt — der Browser darf sie auslagern
   const STUECK = Math.floor((8 << 20) / L) * L;
-  let aus = new Uint8Array(STUECK), dv = new DataView(aus.buffer), o = 0, anzahl = 0;
-  const teile = [];
+  const ausgaben = Array.from({ length: getrennt ? 2 : 1 }, () => ({ aus: new Uint8Array(STUECK), o: 0, anzahl: 0, teile: [],
+    min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity], rueck: new Array(15).fill(0) }));
+  for (const a of ausgaben) a.dv = new DataView(a.aus.buffer);
   const punkt = LP._malloc(64);
   try {
     for (let t = 0; t < da.length; t++) {
@@ -719,7 +720,9 @@ async function lasBauen(LP, da, b, { nurBoden, ziel, farbeFuer }) {
           if (X < X0 || X >= X1 || Y < Y0 || Y >= Y1) continue;
           const kl = altNeu ? heap[q + 16] : heap[q + 15] & 31;
           if (nurBoden && !BODEN.has(kl)) continue;
-          if (o === STUECK) { teile.push(new Blob([aus])); aus = new Uint8Array(STUECK); dv = new DataView(aus.buffer); o = 0; }
+          const a = ausgaben[getrennt && !BODEN.has(kl) ? 1 : 0];
+          if (a.o === STUECK) { a.teile.push(new Blob([a.aus])); a.aus = new Uint8Array(STUECK); a.dv = new DataView(a.aus.buffer); a.o = 0; }
+          const { aus, dv, o, min, max, rueck } = a;
           const e = X * sx + ox, n = Y * sy + oy, h = quelle.getInt32(8, true) * sz + oz;
           if (umrechnen) umrechnen(e, n, h, xy); else { xy[0] = e; xy[1] = n; }
           const XO = Math.round((xy[0] - versatz[0]) / skala[0]), YO = Math.round((xy[1] - versatz[1]) / skala[1]);
@@ -757,8 +760,8 @@ async function lasBauen(LP, da, b, { nurBoden, ziel, farbeFuer }) {
           if (x < min[0]) min[0] = x; if (x > max[0]) max[0] = x;
           if (y < min[1]) min[1] = y; if (y > max[1]) max[1] = y;
           if (z < min[2]) min[2] = z; if (z > max[2]) max[2] = z;
-          o += L;
-          anzahl++;
+          a.o += L;
+          a.anzahl++;
         }
       } finally {
         laszip.delete();
@@ -767,11 +770,13 @@ async function lasBauen(LP, da, b, { nurBoden, ziel, farbeFuer }) {
   } finally {
     LP._free(punkt);
   }
-  if (o) teile.push(new Blob([aus.subarray(0, o)]));
-  if (!anzahl) return { blob: null, punkte: 0 };
-  if (!neu && anzahl > 0xffffffff) throw new Error('Zu viele Punkte für LAS 1.2.');
-  const kopf = lasKopf({ neu, format, anzahl, rueck, skala, versatz, min, max, kodierung: da[0].kopf.kodierung, ziel });
-  return { blob: new Blob([kopf, ...teile], { type: 'application/octet-stream' }), punkte: anzahl };
+  return ausgaben.map(({ aus, o, anzahl, teile, min, max, rueck }) => {
+    if (o) teile.push(new Blob([aus.subarray(0, o)]));
+    if (!anzahl) return { blob: null, punkte: 0 };
+    if (!neu && anzahl > 0xffffffff) throw new Error('Zu viele Punkte für LAS 1.2.');
+    const kopf = lasKopf({ neu, format, anzahl, rueck, skala, versatz, min, max, kodierung: da[0].kopf.kodierung, ziel });
+    return { blob: new Blob([kopf, ...teile], { type: 'application/octet-stream' }), punkte: anzahl };
+  });
 }
 
 /* ---------- LoD2 als DXF ----------
@@ -800,12 +805,12 @@ function dxfBauen({ ecken, wand }, ziel) {
   return new Blob(teile, { type: 'application/dxf' });
 }
 
-async function exportieren({ kacheln, bereich, einzeln, nurBoden, ziel, luftbild, gebaeude, name, zusatz, vorratMax }) {
+async function exportieren({ kacheln, bereich, einzeln, nurBoden, getrennt, ziel, luftbild, gebaeude, name, zusatz, vorratMax }) {
   if (!lazPerf) lazPerf = await Copc.Las.PointData.createLazPerf({ locateFile: f => 'vendor/copc/' + f });
   const LP = lazPerf;
   const { da, fehlen } = await kachelnHolen(LP, kacheln, vorratMax);
   const datei = (n, blob, punkte) => senden({ art: 'datei', name: n, blob, punkte });
-  if (einzeln && ziel === 'utm' && !luftbild && !nurBoden) {
+  if (einzeln && ziel === 'utm' && !luftbild && !nurBoden && !getrennt) {
     // Unverändert: das LAZ der BVV je Kachel, so wie es im Vorrat liegt
     for (const k of da) datei(`${k.kachel}.laz`, new Blob([LP.HEAPU8.subarray(k.zeiger, k.zeiger + k.groesse)], { type: 'application/octet-stream' }), k.kopf.anzahl);
   } else {
@@ -821,9 +826,10 @@ async function exportieren({ kacheln, bereich, einzeln, nurBoden, ziel, luftbild
       bild = await luftbildHolen(einzeln ? luftbild[da[t].kachel] : luftbild);
       return bild;
     };
-    const { blob, punkte } = await lasBauen(LP, da, b, { nurBoden, ziel, farbeFuer });
-    if (!blob) throw new Error(einzeln ? 'In den Kacheln liegen keine passenden Punkte.' : 'Im Ausschnitt liegen keine Laserpunkte.');
-    datei(`${name}${zusatz}.las`, blob, punkte);
+    const ergebnis = await lasBauen(LP, da, b, { nurBoden, getrennt, ziel, farbeFuer });
+    if (!ergebnis.some(e => e.blob)) throw new Error(einzeln ? 'In den Kacheln liegen keine passenden Punkte.' : 'Im Ausschnitt liegen keine Laserpunkte.');
+    const endung = getrennt ? ['_boden', '_rest'] : [''];
+    ergebnis.forEach(({ blob, punkte }, i) => { if (blob) datei(`${name}${zusatz}${endung[i]}.las`, blob, punkte); });
   }
   if (gebaeude && gebaeude.wand.length) datei(`${name}_lod2${zusatz.replace('_rgb', '')}.dxf`, dxfBauen(gebaeude, ziel), 0);
   senden({ art: 'fertig', fehlen });

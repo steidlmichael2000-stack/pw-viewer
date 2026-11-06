@@ -699,6 +699,9 @@ body {
   text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 5px var(--bg);
 }
 .mitte-zahl:empty { display: none; }
+/* Mit der Maus folgt das Kreuz dem Zeiger (messLiveZeichnen) — gezeichnet wird nur die Zahl daneben */
+.mittekreuz.maus svg { visibility: hidden; }
+.mittekreuz.maus .mitte-zahl { left: 34px; top: calc(50% + 14px); }
 
 /* ---------- Verlauf beim Tippen ---------- */
 
@@ -1114,7 +1117,6 @@ input[type="range"] { min-width: 0; }
 .kml-pop small { display: block; margin-top: 6px; color: var(--muted-2); font-size: .68rem; }
 /* Street View hinter dem langen Druck auf „In Google Maps öffnen" (svBinden);
    gegen die Textauswahl siehe .parz-knopf */
-.bb-actions .sv-hinweis { display: block; font-size: .68rem; font-weight: 500; opacity: .78; }
 /* Street View in der Sprechblase: ein Link, der aussieht wie die Knöpfe darüber */
 .kml-pop a.kml-km { box-sizing: border-box; color: var(--accent); text-decoration: none; }
 
@@ -1823,7 +1825,7 @@ input[type="range"] { min-width: 0; }
 .schiene, .werkzeuge, .leiste-griff, .marke { display: none; }
 
 @media (min-width: 1010px) {
-  :root { --schiene: 64px; --seite: 320px; --links: calc(var(--schiene) + var(--seite)); --werkzeug-b: 68px; }
+  :root { --schiene: 64px; --seite: 320px; --links: calc(var(--schiene) + var(--seite)); --werkzeug-b: 42px; }
 
   /* Icon und Name oben links: eine Kopfzeile über Spalte und Leiste. Das Icon ist so
      groß wie die Knöpfe der Spalte (52 × 52, links 6 = Spaltenrand), Mitte 32 auf 32;
@@ -1870,6 +1872,9 @@ input[type="range"] { min-width: 0; }
   /* Profil und Laser sind Werkzeuge, keine Bereiche: laufen sie, getönt wie in der
      Werkzeugleiste rechts — gefüllt ist nur der Bereich, der in der Leiste offen ist */
   .schiene .schiene-werkzeug.is-on { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
+  /* Profil und Mappe zeigen ihre Bedienung in der Leiste: steht sie dort, ist ihr Feld
+     das gewählte wie ein Bereich (gefüllt); liegt ein Abschnitt darüber, nur getönt */
+  .schiene .schiene-werkzeug.gewaehlt { background: var(--accent); color: var(--accent-ink); }
   /* Hinweise ganz unten (so gewünscht, 04.11.2026) */
   .schiene .schiene-unten { margin-top: auto; }
 
@@ -1916,6 +1921,9 @@ input[type="range"] { min-width: 0; }
   .sheet { flex: 1 1 auto; min-height: 0; max-height: none; margin-top: 4px; }
   .bar-bottom:not([data-art="werkzeug"]) { margin: 8px auto 0; border-top: 1px solid var(--line); border-radius: 0; }
   .bar-bottom:not([hidden]):not([data-art="werkzeug"]) { animation-name: von-oben; }
+  /* Profil und Mappe (data-art="profil", 06.11.2026): Bedienung unter der Suche; was nicht
+     passt (Diagramm, Ebenen, Mappenliste), rollt in der Leiste */
+  .bar-bottom[data-art="profil"] { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   /* Die Quellenzeile ist nur noch Abstandhalter, ihr Inhalt steht unten in der Leiste */
   .quellen, #hoehenLeiste[hidden] + #ziel[hidden] + #bottom[hidden] + .quellen, .menue-offen .quellen { order: 3; height: 0; margin: 0; }
   /* Unten in der Leiste so breit wie die Suche und gefüllt wie sie — kein Glas auf Glas;
@@ -1958,35 +1966,43 @@ input[type="range"] { min-width: 0; }
   /* Messen läuft über die Werkzeugleiste */
   .mapmess, .mess-menue, .maplaser { display: none; }
 
-  /* Werkzeugleiste hochkant unten rechts (03.11.2026): quer lag sie den Anwendungen
-     unten mittig im Weg, die mussten bei schmalem Fenster über sie ausweichen */
-  .werkzeuge {
-    position: fixed; z-index: 450; right: 16px; bottom: 16px; width: var(--werkzeug-b);
-    display: flex; flex-direction: column; gap: 2px; padding: 4px;
-    border-radius: var(--r); background: var(--glass); box-shadow: var(--shadow);
+  /* Messknopf unten rechts, allein und rund wie der Standortknopf (06.11.2026 so gewünscht;
+     vorher eine hochkant stehende Leiste mit Profil und Mappe). Polygon und Abstand
+     klappen nach oben aus, mittig über dem Knopf. */
+  .werkzeuge { position: fixed; z-index: 450; right: 16px; bottom: 16px; display: block; }
+  .werkzeuge .werkzeug-mess {
+    display: grid; place-items: center; width: var(--werkzeug-b); height: var(--werkzeug-b); padding: 0;
+    border-radius: 50%; border: 1px solid transparent; cursor: pointer;
+    background: var(--glass); color: var(--muted); box-shadow: var(--shadow);
     backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
   }
-  .werkzeuge button, .werkzeug-mess-menue button {
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-    width: 60px; height: 52px; padding: 0; border: 0; border-radius: var(--r-knopf);
-    background: none; color: var(--muted); cursor: pointer;
-    font: inherit; font-size: .64rem; font-weight: 600;
-  }
-  .werkzeuge svg, .werkzeug-mess-menue svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
-  .werkzeuge svg .voll, .werkzeug-mess-menue svg .voll { fill: currentColor; stroke: none; }
-  .werkzeuge button:hover, .werkzeug-mess-menue button:hover { background: var(--panel-2); color: var(--text); }
-  .werkzeuge button.is-on { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
-  /* Messen nur als Symbol; klappt Polygon und Abstand nach links aus, Unterkante auf Unterkante */
-  .werkzeuge .werkzeug-mess { height: 44px; }
-  .werkzeuge .werkzeug-mess[aria-expanded="true"] { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
+  .werkzeuge .werkzeug-mess:hover { color: var(--text); }
+  .werkzeuge .werkzeug-mess[aria-expanded="true"] { color: var(--text); }
+  .werkzeuge .werkzeug-mess.is-on { color: var(--warn); background: color-mix(in srgb, var(--warn) 22%, var(--glass)); }
+  /* Ausgeklappt: je eine Pille aus Glas mit Name und Symbol, rechts bündig mit dem
+     Messknopf, das Symbol genau über seiner Mitte (06.11.2026: ein eckiger Block und
+     getrennte Namensschilder sahen beide nicht gut aus) */
   .werkzeug-mess-menue {
-    position: fixed; z-index: 510; right: calc(16px + var(--werkzeug-b) + 8px); bottom: 16px;
-    display: flex; gap: 2px; padding: 4px;
-    border-radius: var(--r); background: var(--glass); box-shadow: var(--shadow);
-    backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    position: fixed; z-index: 510; right: 16px; bottom: calc(16px + var(--werkzeug-b) + 8px);
+    display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
   }
+  .werkzeug-mess-menue button {
+    display: flex; align-items: center; gap: 9px;
+    height: var(--werkzeug-b); padding: 0 calc(var(--werkzeug-b) / 2 - 10px - 1px) 0 15px;
+    border-radius: calc(var(--werkzeug-b) / 2); border: 1px solid transparent; cursor: pointer;
+    background: var(--glass); color: var(--muted); box-shadow: var(--shadow);
+    backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    font: inherit; font-size: .8rem; font-weight: 600;
+  }
+  .werkzeug-mess-menue button span { color: var(--text); }
+  .werkzeug-mess-menue button.is-on span { color: inherit; }
+  .werkzeug-mess-menue button svg { order: 2; }
+  .werkzeuge svg, .werkzeug-mess-menue svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+  .werkzeug-mess-menue svg .voll { fill: currentColor; stroke: none; }
+  .werkzeug-mess-menue button:hover { color: var(--text); }
+  .werkzeug-mess-menue button.is-on { color: var(--warn); background: color-mix(in srgb, var(--warn) 22%, var(--glass)); }
   .werkzeug-mess-menue[hidden] { display: none; }
-  .werkzeug-mess-menue:not([hidden]) { transform-origin: right bottom; animation: vom-knopf .22s var(--auf); }
+  .werkzeug-mess-menue:not([hidden]) > * { animation: von-unten .22s var(--auf); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2163,20 +2179,26 @@ body { font-variant-numeric: tabular-nums; }
 .lz-faerbung { display: grid; grid-template-columns: 1fr 1fr; }
 .lz-klassen { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 /* Steht die letzte Klasse allein in ihrer Zeile, nimmt sie die ganze Breite — „Objekte, Bewuchs“ brach sonst um */
-.lz-klasse:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.lz-tafel .breit, .lz-seite .breit { grid-column: 1 / -1; }
 /* Passt die Zahl nicht neben den Namen („Unklassifiziert“ am Desktop), rutscht sie rechtsbündig darunter */
 .lz-klasse { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 7px; min-width: 0; padding: 8px 10px; text-align: left; white-space: normal; }
 .lz-klasse .lz-name { flex: 1 0 auto; font-size: .78rem; line-height: 1.2; }
 .lz-klasse small { margin-left: auto; font-size: .66rem; opacity: .7; font-variant-numeric: tabular-nums; }
 /* Gebäude: ein Schalter über die ganze Breite, wie die Klassen gebaut */
 .lz-geb, .lz-ex-geb { width: 100%; }
+.lz-aufl .lz-geb { grid-column: 1 / -1; }
+/* Tafel: Punktgröße fest oben, darunter die Abschnitte zum Aufklappen */
+.lz-tafel .lz-oben { margin: 14px 0 16px; }
+.lz-tafel .sheet-sec { padding: 10px 0; }
+.lz-tafel .sheet-sec:first-of-type { border-top: 1px solid var(--line); }
+.lz-tafel .sheet-sec > summary + .slider-row { margin-top: 0; }
+.lz-effekte { margin-top: 10px; }
 /* Export (nur in der Leiste am Desktop) */
 .lz-ex-umfang { margin: 12px 0 0; }
 .lz-ex-lauf { margin-top: 10px; }
 .lz-ex-hinweis { margin: 8px 0 0; font-size: .74rem; color: var(--muted); }
 .lz-geb.laedt { opacity: .7; }
 /* Fünf Färbungen: Luftbild allein in der letzten Zeile über die ganze Breite */
-.lz-faerbung .seg-btn:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .lz-feld { flex: none; width: 10px; height: 10px; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255, 255, 255, .5); }
 .lz-skala {
   position: absolute; z-index: 2; left: 50%; top: calc(var(--gap) + 52px + env(safe-area-inset-top)); transform: translateX(-50%);
@@ -2216,6 +2238,7 @@ body { font-variant-numeric: tabular-nums; }
 .lz-marke.gross { padding: 4px 9px; font-size: .8rem; color: var(--warn); }
 /* Auflagen: Streckennummer im Ton der Achse, KML-Namen kleiner, gesuchte Stelle rot wie der Stab */
 .lz-marke.achse { color: #55a5e7; font-weight: 600; }
+.lz-marke.strasse { color: #f5d76e; }
 .lz-marke.kml { padding: 2px 6px; font-size: .66rem; }
 .lz-marke.ziel { color: #ff453a; text-align: center; line-height: 1.3; }
 .lz-marke b { font-weight: 650; }
