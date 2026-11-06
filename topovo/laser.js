@@ -30,7 +30,25 @@ const klasseFarbe = k => (KLASSEN[k] || [0, '#c8c8c8'])[1];
 // Dieselben Töne wie die Höhenfarben auf der Karte (HOEHEN_RAMPE in app.js)
 const RAMPE = ['#2c3e94', '#2a7dc4', '#33b2b0', '#7ccc6c', '#e6dd55', '#f19a3c', '#c8382f'];
 
-const zahl = (v, s = 2) => v.toLocaleString('de-DE', { minimumFractionDigits: s, maximumFractionDigits: s });
+/* Quellenvermerk als Text, die Lizenzkürzel darin als Link auf den Lizenztext
+ * (CC BY 4.0, Abschnitt 3(a)(1)(C)). Über Knoten statt innerHTML: datenName
+ * kommt im PW-Viewer aus dem Dateinamen. */
+const LIZENZ_LINKS = {
+  'CC BY 4.0': 'https://creativecommons.org/licenses/by/4.0/deed.de',
+  'ODbL': 'https://www.openstreetmap.org/copyright',
+  'dl-de/by-2-0': 'https://www.govdata.de/dl-de/by-2-0'
+};
+function lizenzTextSetzen(el, text) {
+  el.replaceChildren();
+  for (const teil of String(text).split(/(CC BY 4\.0|ODbL|dl-de\/by-2-0)/)) {
+    if (!LIZENZ_LINKS[teil]) { if (teil) el.append(teil); continue; }
+    const a = document.createElement('a');
+    a.href = LIZENZ_LINKS[teil]; a.target = '_blank'; a.rel = 'noopener'; a.textContent = teil;
+    el.append(a);
+  }
+}
+
+const zahl = (v, s = 2) =>v.toLocaleString('de-DE', { minimumFractionDigits: s, maximumFractionDigits: s });
 
 const PUNKT_VS = `
   attribute vec3 farbe, normale;
@@ -175,6 +193,10 @@ const GEB_FS = `
 /* Streckenachsen der DB InfraGO: der helle Lapis-Ton (wie im Dunkelmodus der
  * App), Ziel der Suche rot wie ein Kartenpin — Orange trägt schon das Messen. */
 const ACHS_FARBE = '#55a5e7';
+/* Regen: gewünschte Zeitraffung (Sekunden Regen je Sekunde). Wie viele Schritte
+ * je Bild gehen, regelt bild() nach der Bildrate — auf einer Intel-Grafik schaffte
+ * „Schnell“ mit festen 140 Schritten nur 3 Bilder je Sekunde. */
+const TEMPO_RAFFUNG = { langsam: 30, normal: 150, schnell: 600 };
 const ZIEL_FARBE = '#ff453a';
 /* Straßen (OpenFreeMap/OSM): Haupt-, Nebenstraßen, Wege — warmes Gelb wie die
  * Straßen auf Karten, abgestuft; Blau trägt die Bahn, Weiß die Höhenlinien. */
@@ -202,6 +224,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       <button type="button" data-lz="karte" aria-label="Zurück zur Karte"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg><span>Zurück</span></button>
       <button type="button" data-lz="darstellung"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/></svg><span>Darstellung</span></button>
       <button type="button" data-lz="messen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 16.5 16.5 3.5l4 4-13 13z"/><path d="M7 13l1.8 1.8M10 10l1.8 1.8M13 7l1.8 1.8"/></svg><span>Messen</span></button>
+      <button type="button" data-lz="regen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 15.5a4 4 0 0 1-.6-7.95A5.5 5.5 0 0 1 17 8.5a3.5 3.5 0 0 1 .5 7"/><path d="M9 18l-1 2.5M13 18l-1 2.5M17 18l-1 2.5"/></svg><span>Regen</span></button>
       <button type="button" data-lz="export"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 16v3.5h14V16"/></svg><span>Export</span></button>
       <button type="button" data-lz="heim" class="lz-schiene-heim"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 4.5l8 7"/><path d="M6.5 9.5V19h11V9.5"/></svg><span>Ansicht</span></button>
     </nav>
@@ -209,6 +232,70 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       <div class="lz-seite-kopf"><p class="bb-title lz-seite-titel-text"></p><p class="bb-sub lz-seite-unter"></p></div>
       <section data-bereich="darstellung"><h2 class="lz-seite-titel">Darstellung</h2></section>
       <section data-bereich="messen"><h2 class="lz-seite-titel">Messen</h2></section>
+      <section data-bereich="regen"><h2 class="lz-seite-titel">Regen</h2>
+        <p class="bb-sub lz-regen-vorher">Lässt es auf den Laserboden regnen und zeigt, wo das Wasser hinläuft und stehen bleibt.</p>
+        <div class="lz-regen-knoepfe">
+          <button type="button" class="lz-regen-los" aria-label="Regen starten" title="Regen starten">
+            <svg class="ik-los" viewBox="0 0 24 24" aria-hidden="true"><path class="voll" d="M8 5.5v13l10.5-6.5z"/></svg>
+            <svg class="ik-halt" viewBox="0 0 24 24" aria-hidden="true"><path class="voll" d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>
+          </button>
+          <button type="button" class="lz-regen-neu" aria-label="Von vorn" title="Von vorn — Wasser weg, Zeit auf null" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4v4.5H9"/></svg>
+          </button>
+          <button type="button" class="lz-regen-ende" aria-label="Beenden" title="Beenden — zurück zur normalen Punktwolke" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect class="voll" x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg>
+          </button>
+        </div>
+        <p class="fine lz-regen-stand" hidden></p>
+        <div class="lz-regen-werte" hidden></div>
+        <div class="lz-regen-kostra-teil">
+          <p class="pal-label">Jährlichkeit · KOSTRA-DWD-2020</p>
+          <div class="seg seg-paar lz-regen-jahre" role="group" aria-label="Jährlichkeit">
+            <button type="button" class="seg-btn" data-jahre="0" title="Regen und Dauer selbst einstellen">Frei</button>
+            <button type="button" class="seg-btn" data-jahre="1" disabled>1 a</button>
+            <button type="button" class="seg-btn" data-jahre="10" disabled>10 a</button>
+            <button type="button" class="seg-btn" data-jahre="30" disabled>30 a</button>
+            <button type="button" class="seg-btn" data-jahre="100" disabled>100 a</button>
+          </div>
+          <p class="fine lz-regen-kostra"></p>
+        </div>
+        <label class="slider-row">Regen
+          <input type="range" class="lz-regen-menge" min="5" max="200" step="5" value="30">
+          <span class="slider-val lz-regen-menge-wert"></span>
+        </label>
+        <label class="slider-row">Dauer
+          <input type="range" class="lz-regen-dauer" min="0.25" max="24" step="0.25" value="1">
+          <span class="slider-val lz-regen-dauer-wert"></span>
+        </label>
+        <label class="slider-row">Versickern
+          <input type="range" class="lz-regen-sicker" min="0" max="30" step="1" value="5">
+          <span class="slider-val lz-regen-sicker-wert"></span>
+        </label>
+        <label class="slider-row">Überhöhung
+          <input type="range" class="lz-regen-hoch" min="1" max="20" step="1" value="1">
+          <span class="slider-val lz-regen-hoch-wert"></span>
+        </label>
+        <p class="pal-label">Tempo</p>
+        <div class="seg seg-paar lz-regen-tempo" role="group" aria-label="Tempo">
+          <button type="button" class="seg-btn" data-tempo="langsam">Langsam</button>
+          <button type="button" class="seg-btn is-on" data-tempo="normal">Normal</button>
+          <button type="button" class="seg-btn" data-tempo="schnell">Schnell</button>
+        </div>
+        <p class="pal-label">Zeigen</p>
+        <div class="seg seg-paar" role="group" aria-label="Zeigen">
+          <button type="button" class="seg-btn is-on" data-regen-ansicht="punkte">Punkte</button>
+          <button type="button" class="seg-btn" data-regen-ansicht="gelaende" title="Das Raster, auf dem das Wasser läuft">Gelände</button>
+          <button type="button" class="seg-btn" data-regen-ansicht="luftbild" title="Geländemodell mit dem Luftbild (DOP20) darauf">Luftbild</button>
+        </div>
+        <p class="pal-label">Gebäude</p>
+        <div class="seg seg-paar" role="group" aria-label="Gebäude">
+          <button type="button" class="seg-btn is-on" data-regen-geb="1" title="Wasser fließt um Häuser herum">Als Hindernis</button>
+          <button type="button" class="seg-btn" data-regen-geb="0" title="Boden unter Häusern aus der Umgebung aufgefüllt">Weglassen</button>
+        </div>
+        <p class="fine lz-regen-legende" hidden><span><i style="background:#dbd9d1"></i>Boden gemessen</span>
+          <span><i style="background:#9e968a"></i>aufgefüllt</span><span class="lz-legende-geb"><i style="background:#cc6b5c"></i><b>Gebäude</b></span></p>
+        <p class="fine lz-regen-hinweis">Durchlässe und Rohre unter Dämmen und Wegen kennt die Laserwolke nicht — dort staut sich das Wasser, auch wenn es in Wirklichkeit durchläuft. Gebäude sind Hindernisse, Bewuchs zählt nicht.</p>
+      </section>
       <section data-bereich="export"><h2 class="lz-seite-titel">Export</h2>
         <p class="pal-label">Umfang</p>
         <div class="seg seg-paar" role="group" aria-label="Umfang">
@@ -250,6 +337,11 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     <button type="button" class="lz-knopf lz-messen" aria-label="Messen" aria-expanded="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 16.5 16.5 3.5l4 4-13 13z"/><path d="M7 13l1.8 1.8M10 10l1.8 1.8M13 7l1.8 1.8"/></svg>
     </button>
+    <button type="button" class="lz-knopf lz-regen-knopf" aria-label="Regen" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 15.5a4 4 0 0 1-.6-7.95A5.5 5.5 0 0 1 17 8.5a3.5 3.5 0 0 1 .5 7"/><path d="M9 18l-1 2.5M13 18l-1 2.5M17 18l-1 2.5"/></svg>
+    </button>
+    <!-- Am Handy wandert der Regen-Abschnitt der Leiste hierher (anordnen) -->
+    <div class="lz-regen-tafel" hidden></div>
     <button type="button" class="lz-knopf lz-ort" aria-label="Standort zeigen" aria-pressed="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle class="voll" cx="12" cy="12" r="3.4"/><circle cx="12" cy="12" r="7.4" class="ring"/><path d="M12 1.6v3M12 19.4v3M1.6 12h3M19.4 12h3"/></svg>
     </button>
@@ -359,6 +451,9 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       </div>
     </div>
     <div class="lz-marken"></div>
+    <!-- Am Handy stehen Start/Pause, Von vorn, Beenden hier unten (anordnen), nicht in der Tafel.
+         Nach .lz-marken: davor hängt anordnen die Messleiste ein, und die verdrängt diese Leiste per CSS -->
+    <div class="lz-regen-leiste" hidden></div>
     <p class="lz-tipp"></p>
     <p class="lz-fuss"></p>`;
   wurzel.dataset.grund = 'verlauf';
@@ -379,8 +474,10 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   if (!info.gebaeude && !info.achsen && !info.kml && !info.strassen) weg('.lz-aufl-titel');
   if (!info.exportieren) weg('[data-lz="export"], [data-bereich="export"]');
   if (!info.utm) weg('.lz-ort');
+  if (!info.kostra) weg('.lz-regen-kostra-teil');
+  if (!info.luftbild) weg('[data-regen-ansicht="luftbild"]');
   // Höhenlinien kommen aus den Bodenpunkten — Drohnenwolken (PW-Viewer) haben keine
-  if (!d.klassen.some(([k]) => BODEN.has(k))) weg('[data-effekt="linien"]');
+  if (!d.klassen.some(([k]) => BODEN.has(k))) weg('[data-effekt="linien"], [data-lz="regen"], [data-bereich="regen"], .lz-regen-knopf');
   /* In den Rastern zu zwei Spalten nimmt ein allein stehender letzter Knopf die
    * ganze Breite. Nach den sichtbaren gezählt — :nth-child zählt ausgeblendete
    * mit, dann stand „Neigung“ allein und „Luftbild“ breit darunter. */
@@ -484,11 +581,12 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   steuerung.keyPanSpeed = 20;
 
   const halb = info.seite / 2, hoch = d.zMax - d.zMin;
+  let ueber = 1;          // Überhöhung (Regen), alle Szenen in z gestreckt
   function heim() {
     /* Im Gebirge ist der Ausschnitt höher als breit (Zugspitze: 900 m auf 200 m),
      * dann zählt die Höhe als Größe und der Blick zielt auf die Mitte */
-    const gross = Math.max(halb, hoch * 0.6);
-    steuerung.target.set(0, 0, hoch > halb ? hoch / 2 : hoch / 3);
+    const hochS = hoch * ueber, gross = Math.max(halb, hochS * 0.6);
+    steuerung.target.set(0, 0, hochS > halb ? hochS / 2 : hochS / 3);
     /* Von Süden, schräg von oben, der ganze Ausschnitt im Bild. Hochkant (Handy)
      * ist das Bild schmaler als hoch: dann weiter weg, sonst fehlen links und rechts. */
     const w = wurzel.clientWidth, h = wurzel.clientHeight;
@@ -622,9 +720,9 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   }
   const quellenNeu = () => {
     const was = [info.datenName || 'Laserdaten', luftbild && 'Luftbild', geb && 'Gebäude LoD2'].filter(Boolean);
-    $('.lz-fuss').textContent = `${was.join(', ').replace(/, ([^,]*)$/, ' und $1')}: ${info.quelle}` +
+    lizenzTextSetzen($('.lz-fuss'), `${was.join(', ').replace(/, ([^,]*)$/, ' und $1')}: ${info.quelle}` +
       (achsen && achsen.anzahl ? ' · Streckenachsen: DB InfraGO (CC BY 4.0), bearbeitet' : '') +
-      (strassen && strassen.gruppe.visible ? ' · Straßen: OpenFreeMap, © OpenStreetMap' : '');
+      (strassen && strassen.gruppe.visible ? ' · Straßen: OpenFreeMap, © OpenStreetMap (ODbL)' : ''));
   };
 
   /* ---------- Färbung nach Luftbild ----------
@@ -634,6 +732,8 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
    * Farbe von Dach oder Straße, der Boden unter Bäumen die der Krone. Höchstens
    * 3000 Bildpunkte je Seite (bei 1 km also 33 cm), in Stücken zu 1500. */
   let luftbild = null, luftbildLaeuft = null;
+  // Am Rechner bleibt das Luftbild als Bild stehen — als Textur fürs Geländemodell (Regen)
+  let luftbildFlaeche = null;
   async function luftbildHolen() {
     const res = Math.max(0.2, info.seite / 3000), px = Math.round(info.seite / res);
     const e0 = d.mitte[0] - halb, n1 = d.mitte[1] + halb, STUECK = 1500;
@@ -651,7 +751,16 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     }
     await Promise.all(teile);
     const pix = g.getImageData(0, 0, px, px).data;
-    lw.width = lw.height = 0;
+    /* Fürs Geländemodell (Regen) behalten: am Rechner ganz, am Handy auf höchstens
+     * 1536 px verkleinert (9 statt bis 36 MB) — das große Bild gleich frei */
+    if (desktop.matches || px <= 1536) luftbildFlaeche = lw;
+    else {
+      const klein = document.createElement('canvas');
+      klein.width = klein.height = 1536;
+      klein.getContext('2d').drawImage(lw, 0, 0, 1536, 1536);
+      lw.width = lw.height = 0;
+      luftbildFlaeche = klein;
+    }
     const rgb = new Uint8Array(n * 3);
     for (let i = 0; i < n; i++) {
       const sp = Math.min(px - 1, Math.max(0, Math.floor((d.xyz[3 * i] + halb) / res)));
@@ -1043,6 +1152,13 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     gebKnopf.querySelector('small').textContent = !an ? 'aus' : `${geb.anzahl.toLocaleString('de-DE')} Gebäude`;
     neu = true;
   }
+  /* LoD2 des Ausschnitts, einmal geholt — für die Auflage und als Hindernis beim Regen */
+  let lod2Roh = null;
+  function lod2Holen() {
+    if (!lod2Roh) lod2Roh = info.gebaeude(d.mitte[0] - halb, d.mitte[1] - halb, d.mitte[0] + halb, d.mitte[1] + halb)
+      .catch(err => { lod2Roh = null; throw err; });
+    return lod2Roh;
+  }
   gebKnopf.addEventListener('click', async () => {
     if (geb) { gebZeigen(!geb.gruppe.visible); return; }
     if (gebLaeuft) return;
@@ -1050,7 +1166,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     gebKnopf.classList.add('laedt');
     gebKnopf.querySelector('small').textContent = 'lädt …';
     try {
-      const roh = await info.gebaeude(d.mitte[0] - halb, d.mitte[1] - halb, d.mitte[0] + halb, d.mitte[1] + halb);
+      const roh = await lod2Holen();
       if (!laeuft) return;
       // Nur Gebäude mit der Mitte im Ausschnitt — die übrigen stünden neben der Wolke in der Luft
       const liste = roh.filter(b => Math.abs((b.bb[0] + b.bb[2]) / 2 - d.mitte[0]) <= halb && Math.abs((b.bb[1] + b.bb[3]) / 2 - d.mitte[1]) <= halb);
@@ -1454,7 +1570,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   einst.addEventListener('click', () => {
     tafelZeigen(tafel.hidden);
     // Am Handy liegen Tafel und Messmenü übereinander: immer nur eins offen
-    if (!tafel.hidden) menueZeigen(false);
+    if (!tafel.hidden) { menueZeigen(false); regenTafelZeigen(false); }
   });
   let faerbungWahl = faerbung;
   wurzel.querySelectorAll('[data-faerbung]').forEach(b => b.addEventListener('click', async () => {
@@ -1542,7 +1658,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     let best = -1, bestWert = Infinity;
     for (let i = 0; i < n; i++) {
       if (!masken[d.klasse[i] & 31]) continue;
-      const a = d.xyz[3 * i], b = d.xyz[3 * i + 1], c = d.xyz[3 * i + 2];
+      const a = d.xyz[3 * i], b = d.xyz[3 * i + 1], c = d.xyz[3 * i + 2] * ueber;
       const w = m[3] * a + m[7] * b + m[11] * c + m[15];
       if (w <= 0) continue;
       const sx = (m[0] * a + m[4] * b + m[8] * c + m[12]) / w;
@@ -1700,7 +1816,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   }
   function menueZeigen(an) {
     if (desktop.matches) an = true;          // in der Leiste steht die Wahl immer da
-    else if (an) tafelZeigen(false);
+    else if (an) { tafelZeigen(false); regenTafelZeigen(false); }
     menue.hidden = !an;
     $('.lz-messen').setAttribute('aria-expanded', String(an));
   }
@@ -1836,6 +1952,31 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   const seite = $('.lz-seite'), fussVor = $('.lz-marken');
   let bereich = 'darstellung', seiteZu = false;
   const freiLinks = () => !desktop.matches ? 0 : seiteZu ? 64 : 384;
+  /* Regen am Handy: eigene Tafel über dem Regen-Knopf (links, über dem Messen).
+   * Wie Tafel und Messmenü ist immer nur eins offen. */
+  const regenSektion = $('[data-bereich="regen"]'), regenTafel = $('.lz-regen-tafel'), regenKnopf = $('.lz-regen-knopf');
+  const regenLeiste = $('.lz-regen-leiste'), regenKnoepfe = $('.lz-regen-knoepfe'), regenWerteEl = $('.lz-regen-werte');
+  // Am Handy: Tipp auf die Kennzahlen klappt sie auf die Zeit zusammen und wieder auf
+  regenWerteEl.addEventListener('click', () => {
+    if (desktop.matches) return;
+    const knapp = regenWerteEl.classList.toggle('knapp');
+    regenWerteEl.setAttribute('aria-expanded', String(!knapp));
+  });
+  regenWerteEl.setAttribute('role', 'button');
+  regenWerteEl.setAttribute('aria-label', 'Kennzahlen ein- und ausklappen');
+  function regenTafelZeigen(an) {
+    if (desktop.matches) an = false;
+    regenTafel.hidden = !an;
+    regenKnopf.setAttribute('aria-expanded', String(an));
+    regenKnopf.classList.toggle('is-on', an || regenLaeuft);
+    // Bei offener Tafel zeigt die Leiste unten nur die Knöpfe (CSS) — sonst lägen Tafel und Kennzahlen übereinander
+    wurzel.classList.toggle('regen-tafel-offen', an);
+    regenLeisteZeigen();
+    // Bei offener Tafel weg: der Einstellungsknopf oben links verwirrte nur (so gewünscht)
+    einst.hidden = an;
+    if (an) { tafelZeigen(false); menueZeigen(false); regenOeffnen(); }
+  }
+  regenKnopf.addEventListener('click', () => regenTafelZeigen(regenTafel.hidden));
   function anordnen() {
     if (desktop.matches) {
       seite.querySelector('[data-bereich="darstellung"]').appendChild(tafel);
@@ -1844,17 +1985,27 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       m.appendChild(leiste);
       tafel.hidden = false;
       menue.hidden = false;
+      seite.querySelector('[data-bereich="export"]').before(regenSektion);
+      regenSektion.querySelector('.lz-regen-vorher').after(regenKnoepfe);
+      regenSektion.querySelector('.lz-regen-stand').after(regenWerteEl);
+      regenWerteEl.classList.remove('knapp');
+      regenTafelZeigen(false);
     } else {
       for (const el of [tafel, menue, leiste]) wurzel.insertBefore(el, fussVor);
       tafel.hidden = true;
       menue.hidden = true;
       einst.classList.remove('is-on');
+      regenTafel.appendChild(regenSektion);
+      regenSektion.hidden = false;
+      regenLeiste.append(regenWerteEl, regenKnoepfe);
+      regenTafelZeigen(false);
     }
     bereichZeigen();
   }
   function bereichZeigen() {
     wurzel.classList.toggle('seite-zu', seiteZu);
     seite.querySelectorAll('[data-bereich]').forEach(sec => { sec.hidden = sec.dataset.bereich !== bereich; });
+    if (bereich === 'regen') regenOeffnen();
     wurzel.querySelectorAll('.lz-schiene [data-lz]').forEach(b =>
       b.classList.toggle('is-on', !seiteZu && b.dataset.lz === bereich));
     groesseSetzen();
@@ -1869,6 +2020,321 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   }));
   desktop.addEventListener('change', anordnen);
   $('.lz-seite-unter').textContent = info.unterzeile || `Kachel ${info.kachel} · ${info.seite} × ${info.seite} m`;
+
+  /* ---------- Regen (regen.js, nur in der Leiste am Rechner) ----------
+   * Das Raster entsteht erst beim ersten „Regen starten“. Gerechnet wird in
+   * bild(), einige Dutzend Schritte je Bild; die Kennzahlen liest bilanz()
+   * höchstens einmal je Sekunde von der Grafikkarte zurück (bremst, rund 10 MB). */
+  const PFUETZE_CM = 2;
+  let regenLetztesBild = 0, regenGrenze = 20;
+  let regenAnsicht = 'punkte', regenMitGeb = true, regenBewuchsWeg = false, regenGebQuelle = '';
+  let regen = null, regenLaeuft = false, regenTempo = 'normal', regenBilanzZeit = 0, regenLaedt = false;
+  const regenTiefe = { p: new THREE.Vector3(), el: null, lage: 'translate(-50%, -125%)' };
+  const regenAufl = { schilder: [] };
+  const regenRegler = { menge: $('.lz-regen-menge'), dauer: $('.lz-regen-dauer'), sicker: $('.lz-regen-sicker'), hoch: $('.lz-regen-hoch') };
+  const regenLos = $('.lz-regen-los'), regenNeu = $('.lz-regen-neu'), regenWerte = $('.lz-regen-werte');
+  const stunden = h => `${Math.floor(h)}:${String(Math.round((h % 1) * 60)).padStart(2, '0')} h`;
+  const kubik = v => v < 10 ? `${zahl(v, 1)} m³` : `${Math.round(v).toLocaleString('de-DE')} m³`;
+  /* KOSTRA-DWD-2020 (info.kostra, aus app.js): Mit einer Jährlichkeit läuft der
+   * Dauer-Regler über die Dauerstufen des DWD, und der Regen ist Hn / Dauer —
+   * ein Blockregen gleicher Stärke, kein Modellregen mit Spitze. „Frei“ wie vorher. */
+  let kostra = null, kostraJahre = 0, kostraGeholt = false;
+  const KOSTRA_START = { jahre: 100, dauer: 60 };      // so gewünscht: gleich das Hundertjährliche
+  const dauerText = min => min < 60 ? `${min} min` : stunden(min / 60);
+  async function kostraHolen() {
+    if (kostraGeholt || !info.kostra || !d.mitte) return;
+    kostraGeholt = true;
+    $('.lz-regen-kostra').textContent = 'KOSTRA wird geladen …';
+    try { kostra = await info.kostra(d.mitte[0], d.mitte[1]); } catch (err) { console.warn(err); kostra = null; }
+    if (!laeuft) return;
+    wurzel.querySelectorAll('[data-jahre]').forEach(b => { b.disabled = b.dataset.jahre !== '0' && !kostra; });
+    if (kostra) {
+      regenRegler.dauer.min = 0; regenRegler.dauer.max = kostra.dauern.length - 1; regenRegler.dauer.step = 1;
+      regenRegler.dauer.value = String(Math.max(0, kostra.dauern.indexOf(KOSTRA_START.dauer)));
+      kostraJahre = KOSTRA_START.jahre;
+    } else $('.lz-regen-kostra').textContent = 'Für diese Stelle gibt es keine KOSTRA-Werte.';
+    regenJahreZeigen();
+  }
+  function regenJahreZeigen() {
+    wurzel.querySelectorAll('[data-jahre]').forEach(b => b.classList.toggle('is-on', +b.dataset.jahre === kostraJahre));
+    regenRegler.menge.disabled = !!kostraJahre;
+    regenReglerZeigen();
+  }
+  wurzel.querySelectorAll('[data-jahre]').forEach(b => b.addEventListener('click', () => {
+    const vorher = kostraJahre;
+    kostraJahre = +b.dataset.jahre;
+    if (!kostra || vorher === kostraJahre) return regenJahreZeigen();
+    // Zwischen frei (Stunden) und KOSTRA (Stufen) die Dauer so nah wie möglich halten
+    const dv = regenRegler.dauer;
+    if (!kostraJahre && vorher) {
+      const h = kostra.dauern[+dv.value] / 60;
+      dv.min = 0.25; dv.max = 24; dv.step = 0.25; dv.value = String(h);
+    } else if (kostraJahre && !vorher) {
+      const min = +dv.value * 60;
+      let best = 0;
+      kostra.dauern.forEach((m, i) => { if (Math.abs(m - min) < Math.abs(kostra.dauern[best] - min)) best = i; });
+      dv.min = 0; dv.max = kostra.dauern.length - 1; dv.step = 1; dv.value = String(best);
+    }
+    regenJahreZeigen();
+  }));
+  /** Stärke (mm/h) und Dauer (h) — aus KOSTRA oder von den Reglern. */
+  function regenWerteJetzt() {
+    if (kostra && kostraJahre) {
+      const di = +regenRegler.dauer.value, ji = kostra.jahre.indexOf(kostraJahre), min = kostra.dauern[di];
+      return { mmH: kostra.hn[di][ji] / (min / 60), dauerH: min / 60, hn: kostra.hn[di][ji], min };
+    }
+    return { mmH: +regenRegler.menge.value, dauerH: +regenRegler.dauer.value };
+  }
+  function regenReglerZeigen() {
+    const w = regenWerteJetzt();
+    if (w.hn != null) regenRegler.menge.value = String(Math.min(200, Math.round(w.mmH / 5) * 5));
+    $('.lz-regen-menge-wert').textContent = `${zahl(w.mmH, w.hn != null ? 1 : 0)} mm/h`;
+    $('.lz-regen-dauer-wert').textContent = w.min != null ? dauerText(w.min) : stunden(w.dauerH);
+    $('.lz-regen-sicker-wert').textContent = `${regenRegler.sicker.value} mm/h`;
+    $('.lz-regen-hoch-wert').textContent = `${regenRegler.hoch.value} ×`;
+    if (kostra) lizenzTextSetzen($('.lz-regen-kostra'), w.hn != null
+      ? `${zahl(w.hn, 1)} mm in ${dauerText(w.min)}, im Mittel alle ${kostraJahre} ${kostraJahre === 1 ? 'Jahr' : 'Jahre'} erreicht oder überschritten · Rasterfeld ${kostra.zelle} · ${kostra.quelle}`
+      : `Eigene Werte · KOSTRA hier: Rasterfeld ${kostra.zelle}, ${kostra.quelle}`);
+    if (regen) Object.assign(regen.zustand, { regenMmH: w.mmH, dauerH: w.dauerH, versickernMmH: +regenRegler.sicker.value });
+    ueberhoehungSetzen(+regenRegler.hoch.value);
+  }
+  Object.values(regenRegler).forEach(r => r.addEventListener('input', regenReglerZeigen));
+  /* Es regnet immer auf den ganzen Ausschnitt — die Wahl „Gemessene Fläche“
+   * brauchte der Nutzer nicht (06.11.2026, entfernt; regen.bereichSetzen bliebe dafür). */
+  wurzel.querySelectorAll('[data-tempo]').forEach(b => b.addEventListener('click', () => {
+    regenTempo = b.dataset.tempo;
+    wurzel.querySelectorAll('[data-tempo]').forEach(x => x.classList.toggle('is-on', x === b));
+  }));
+  /** Raster und Simulation anlegen (einmal, oder neu nach dem Gebäude-Schalter). */
+  async function regenVorbereiten() {
+    if (regen) return true;
+    if (regenLaedt) return false;
+    {
+      regenLaedt = true;
+      regenLos.disabled = true;
+      regenStand('Gelände wird vorbereitet …');
+      // Erst zeichnen lassen, dann rechnen — sonst steht die Schrift nie da
+      await new Promise(r => setTimeout(r, 30));
+      try {
+        const { regenAnlegen } = await import('./regen.js');
+        if (!laeuft) return false;
+        /* Hindernis aus dem LoD2 (geschlossene Grundrisse); nur ohne LoD2 die
+         * Dachpunkte — die haben Lücken, durch die Wasser ins Haus liefe */
+        let gebaeude = null;
+        if (regenMitGeb) {
+          gebaeude = 'punkte';
+          if (info.gebaeude) {
+            try {
+              gebaeude = (await lod2Holen()).map(b => {
+                let top = -Infinity;
+                for (const r of b.d) for (const h of r.h) top = Math.max(top, h);
+                return { top: top - d.zMin, ringe: b.d.map(r => r.p.map((v, i) => v - d.mitte[i % 2])) };
+              });
+              regenGebQuelle = 'lod2';
+            } catch (err) {
+              console.warn(err);
+              hinweis('LoD2 ließ sich nicht laden — Gebäude aus den Dachpunkten.');
+            }
+          }
+          if (gebaeude === 'punkte') regenGebQuelle = 'punkte';
+          if (!laeuft) return false;
+        }
+        const r = regenAnlegen({ renderer, d, seite: info.seite, gebaeude,
+          lichtRichtung: material.uniforms.lichtRichtung, tiefeUniforms: { tiefe: edl.uniforms.tiefe, nah: edl.uniforms.nah, fern: edl.uniforms.fern, ortho: edl.uniforms.ortho } });
+        if (r.fehler) { hinweis(r.fehler); return false; }
+        regen = r;
+        regen.szene.scale.z = ueber;
+        szene.add(regen.gelaende);
+        regenAnsichtZeigen();
+        if (!regenTiefe.el) regenTiefe.el = schild(regenTiefe.p, '', 'gross').el;
+        regenTiefe.el.hidden = true;
+        regenAufl.schilder = [];
+        regenReglerZeigen();
+      } catch (err) {
+        console.warn(err);
+        hinweis('Regen ließ sich nicht starten.');
+        return false;
+      } finally {
+        regenLaedt = false;
+        regenLos.disabled = false;
+        regenStand('');
+      }
+    }
+    return true;
+  }
+  /* Leiste unten (nur am Handy): da, solange die Tafel offen ist oder ein Regen
+   * läuft oder steht — so lässt er sich anhalten, ohne die Tafel zu öffnen. */
+  function regenLeisteZeigen() {
+    regenLeiste.hidden = desktop.matches || !regenModus;
+    /* Im Regen-Modus am Handy: Startansicht, Messen und Einstellungen weg (so gewünscht),
+     * die Leiste unten nimmt die ganze Breite (CSS .regen-modus) */
+    wurzel.classList.toggle('regen-modus', !regenLeiste.hidden);
+    // Eine offene Messung beenden: ihre Leiste verdrängt die Regenleiste (CSS), und Messen ist hier aus
+    if (!regenLeiste.hidden) { tafelZeigen(false); menueZeigen(false); if (messArt) messArtSetzen(null); }
+  }
+  /* Regen-Modus: beginnt beim ersten Öffnen (Knopf am Handy, Abschnitt in der Leiste)
+   * und endet erst mit „Beenden“. So lange steht am Handy die Leiste unten — sie
+   * verschwand vorher mit der Tafel, und den Startknopf fand man nicht wieder.
+   * Beim Öffnen gleich das Geländemodell (so gewünscht). */
+  let regenModus = false;
+  async function regenOeffnen() {
+    kostraHolen();
+    if (regenModus) return;
+    regenModus = true;
+    regenLeisteZeigen();
+    regenKnoepfeZeigen();
+    regenAnsicht = 'gelaende';
+    if (regen) regenAnsichtZeigen();
+    else if (!(await regenVorbereiten())) { regenAnsicht = 'punkte'; regenAnsichtZeigen(); }
+  }
+  function regenStand(text) {
+    const el = $('.lz-regen-stand');
+    el.textContent = text;
+    el.hidden = !text;
+  }
+  /** Start-/Pausenknopf: Symbol und Beschriftung nach dem Zustand. */
+  function regenKnoepfeZeigen() {
+    const name = regenLaeuft ? 'Anhalten' : regen && regen.zustand.zeit > 0 ? 'Weiter' : 'Regen starten';
+    regenLos.classList.toggle('laeuft', regenLaeuft);
+    regenKnopf.classList.toggle('is-on', regenLaeuft || !regenTafel.hidden);
+    regenLeisteZeigen();
+    regenLos.setAttribute('aria-label', name);
+    regenLos.title = name;
+    const da = !!regen && (regen.zustand.zeit > 0 || regenLaeuft);
+    regenNeu.disabled = !da;
+    $('.lz-regen-ende').disabled = !regenModus;
+  }
+  /* Bewuchs und Sonstiges verdecken das Wasser (im Wald sah man nichts): beim
+   * Start aus, Boden und Gebäude bleiben. „Beenden“ schaltet genau die wieder an. */
+  let regenBewuchsAus = [];
+  function bewuchsAus() {
+    if (regenBewuchsWeg) return;
+    regenBewuchsWeg = true;
+    wurzel.querySelectorAll('.lz-klassenliste [data-klasse].is-on').forEach(b => {
+      const k = Number(b.dataset.klasse);
+      if (!BODEN.has(k) && k !== 6) { b.click(); regenBewuchsAus.push(b); }
+    });
+    // Ohne Meldung (so gewünscht) — „Beenden“ schaltet ihn wieder ein
+  }
+  async function regenUmschalten() {
+    if (!(await regenVorbereiten())) return;
+    regenLaeuft = !regenLaeuft;
+    regenLetztesBild = 0;
+    if (regenLaeuft) bewuchsAus();
+    regenWerte.hidden = false;
+    // Am Handy deckt die Tafel fast alles: beim Start zu, der Knopf leuchtet weiter
+    if (regenLaeuft && !desktop.matches) regenTafelZeigen(false);
+    regenKnoepfeZeigen();
+    neu = true;
+  }
+  /* Beenden: Wasser weg, Punkte, keine Überhöhung, ausgeblendete Klassen wieder
+   * an — die Ansicht wie vor dem Regen. Raster und Einstellungen bleiben. */
+  function regenBeenden() {
+    regenZuruecksetzen();
+    regenAnsicht = 'punkte';
+    regenAnsichtZeigen();
+    regenRegler.hoch.value = '1';
+    regenReglerZeigen();
+    for (const b of regenBewuchsAus) if (!b.classList.contains('is-on')) b.click();
+    regenBewuchsAus = [];
+    regenBewuchsWeg = false;
+    regenModus = false;
+    regenTafelZeigen(false);
+    regenKnoepfeZeigen();
+    neu = true;
+  }
+  $('.lz-regen-ende').addEventListener('click', regenBeenden);
+  regenLos.addEventListener('click', regenUmschalten);
+  /* Zeigen: Punkte oder das Geländemodell, auf dem das Wasser läuft — dort
+   * sieht man, was als Boden zählt und was aufgefüllt ist. */
+  function regenAnsichtZeigen() {
+    wurzel.querySelectorAll('[data-regen-ansicht]').forEach(b => b.classList.toggle('is-on', b.dataset.regenAnsicht === regenAnsicht));
+    const gel = regenAnsicht !== 'punkte' && !!regen;
+    if (regen) {
+      regen.gelaende.visible = gel;
+      regen.luftbildSetzen(regenAnsicht === 'luftbild' ? luftbildFlaeche : null);
+    }
+    wolke.visible = !gel;
+    // Die Legende (gemessen/aufgefüllt/Gebäude) gilt nur für das graue Modell
+    $('.lz-regen-legende').hidden = !gel || regenAnsicht === 'luftbild';
+    $('.lz-legende-geb').hidden = !regenMitGeb;
+    $('.lz-legende-geb b').textContent = regenGebQuelle === 'lod2' ? 'Gebäude (LoD2)' : 'Gebäude (Dachpunkte)';
+    regenKnoepfeZeigen();
+    neu = true;
+  }
+  wurzel.querySelectorAll('[data-regen-ansicht]').forEach(b => b.addEventListener('click', async () => {
+    regenAnsicht = b.dataset.regenAnsicht;
+    if (regenAnsicht !== 'punkte' && !(await regenVorbereiten())) regenAnsicht = 'punkte';
+    if (regenAnsicht === 'luftbild' && !luftbildFlaeche) {
+      // Schon für die Punkte geholt, aber ohne Bild (schmales Fenster): noch einmal
+      if (luftbild && !luftbildLaeuft) luftbild = null;
+      if (!(await luftbildLaden(b)) || !luftbildFlaeche) regenAnsicht = 'gelaende';
+      if (!laeuft) return;
+    }
+    regenAnsichtZeigen();
+  }));
+  /* Gebäude als Hindernis oder weglassen: baut das Raster neu, der Regen fängt von vorn an */
+  wurzel.querySelectorAll('[data-regen-geb]').forEach(b => b.addEventListener('click', async () => {
+    const mit = b.dataset.regenGeb === '1';
+    if (mit === regenMitGeb || regenLaedt) return;
+    regenMitGeb = mit;
+    wurzel.querySelectorAll('[data-regen-geb]').forEach(x => x.classList.toggle('is-on', x === b));
+    if (!regen) return;
+    regenZuruecksetzen();
+    regen.entsorgen();
+    regen = null;
+    await regenVorbereiten();
+  }));
+  // Als Funktion, nicht über regenNeu.click(): Auf einen gesperrten Knopf wirkt click() nicht
+  regenNeu.addEventListener('click', () => regenZuruecksetzen());
+  function regenZuruecksetzen() {
+    if (!regen) return;
+    regen.zuruecksetzen();
+    regenLaeuft = false;
+    regenWerte.hidden = true;
+    regenTiefe.el.hidden = true;
+    // Leer, nicht [regenTiefe]: bild() blendet jedes Schild der Liste wieder ein
+    regenAufl.schilder = [];
+    regenKnoepfeZeigen();
+    neu = true;
+  }
+  function regenBilanzZeigen() {
+    const b = regen.bilanz(), z = regen.zustand;
+    const zeile = (name, wert) => `<span>${name}</span><b>${wert}</b>`;
+    const regnet = z.zeit < z.dauerH * 3600;
+    regenWerte.innerHTML = [
+      // Pfeil nur am Handy sichtbar (CSS): Tipp auf die Kennzahlen klappt sie auf die Zeit zusammen
+      zeile('Zeit', `${stunden(z.zeit / 3600)}${regnet ? ` von ${stunden(z.dauerH)}` : ' · Regen vorbei'}<svg class="lz-klapp" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9.5l6 6 6-6"/></svg>`),
+      zeile('Gefallen', kubik(b.gefallen)),
+      zeile('Steht noch', kubik(b.steht)),
+      zeile(`Wasser über ${PFUETZE_CM} cm`, `${Math.round(b.nassFlaeche).toLocaleString('de-DE')} m²`),
+      zeile('Tiefste Stelle', `${zahl(b.tiefst * 100, 0)} cm`),
+      zeile('Abgeflossen', kubik(b.abgeflossen)),
+      zeile('Versickert', kubik(b.versickert))
+    ].join('');
+    // Schild an der tiefsten Stelle, sobald dort mehr als eine Pfütze steht
+    if (b.tiefOrt && b.tiefst >= 0.05) {
+      regenTiefe.p.copy(b.tiefOrt);
+      regenTiefe.el.innerHTML = `<b>${zahl(b.tiefst * 100, 0)} cm</b>`;
+      regenAufl.schilder = [regenTiefe];
+    } else regenAufl.schilder = [];
+    regenTiefe.el.hidden = !regenAufl.schilder.length;
+  }
+  regenReglerZeigen();
+
+  /* Überhöhung: alle Szenen in z gestreckt. Gemessen wird weiter in echten
+   * Metern — punktAn rechnet die Streckung beim Suchen mit ein, die Punkte
+   * selbst bleiben unverändert. */
+  function ueberhoehungSetzen(k) {
+    if (k === ueber) return;
+    // Der Drehpunkt geht mit, sonst rutscht das Gelände aus dem Bild
+    steuerung.target.z *= k / ueber;
+    ueber = k;
+    for (const s of [szene, gebSzene, linienSzene, auflSzene, messSzene]) s.scale.z = k;
+    if (regen) regen.szene.scale.z = k;
+    if (typeof regenKnoepfeZeigen === 'function') regenKnoepfeZeigen();
+    neu = true;
+  }
 
   /* ---------- Zeichnen ---------- */
   let neu = true, laeuft = true;
@@ -1904,7 +2370,8 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
    * sich auf diesen Bereich, und 0,5 m bis 5 km verschenkte fast alles. */
   const kugelWolke = geo.boundingSphere;
   function tiefeAnpassen() {
-    const abstand = kamera.position.distanceTo(kugelWolke.center), r = kugelWolke.radius;
+    const mitte = v.copy(kugelWolke.center).setZ(kugelWolke.center.z * ueber);
+    const abstand = kamera.position.distanceTo(mitte), r = Math.hypot(kugelWolke.radius, hoch * (ueber - 1));
     kamera.near = Math.max(0.1, (abstand - r) * 0.9, abstand * 0.002);
     kamera.far = abstand + r * 1.1;
     kamera.updateProjectionMatrix();
@@ -1922,6 +2389,18 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     requestAnimationFrame(bild);
     fahrtSchritt();
     steuerung.update();
+    if (regen && regenLaeuft) {
+      const jetztB = performance.now(), abstand = regenLetztesBild ? jetztB - regenLetztesBild : 16;
+      regenLetztesBild = jetztB;
+      // Über 55 ms je Bild (unter rund 18 Bildern je Sekunde) weniger Schritte, unter 35 ms wieder mehr
+      if (abstand > 55) regenGrenze = Math.max(2, regenGrenze * 0.8);
+      else if (abstand < 35) regenGrenze = Math.min(400, regenGrenze * 1.1 + 1);
+      const soll = TEMPO_RAFFUNG[regenTempo] * Math.min(abstand, 60) / 1000 / regen.dt;
+      regen.rechnen(Math.max(1, Math.round(Math.min(soll, regenGrenze))));
+      neu = true;
+      const jetzt = performance.now();
+      if (jetzt - regenBilanzZeit > 1000) { regenBilanzZeit = jetzt; regenBilanzZeigen(); }
+    }
     if (!neu) return;
     neu = false;
     tiefeAnpassen();
@@ -1929,10 +2408,12 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     for (const k of [...kugeln, ...auflKugeln]) k.scale.setScalar((k.userData.faktor || 1) * (kamera === orthoKamera
       ? (orthoKamera.top - orthoKamera.bottom) / orthoKamera.zoom * 0.0045
       : kamera.position.distanceTo(k.position) * 0.006));
+    for (const k of [...kugeln, ...auflKugeln]) k.scale.z /= ueber;
     if (ortGruppe.visible) {
       const s = kamera === orthoKamera ? (orthoKamera.top - orthoKamera.bottom) / orthoKamera.zoom * 0.007
         : kamera.position.distanceTo(ortGruppe.position) * 0.009;
       ortKern.scale.setScalar(s); ortRand.scale.setScalar(s * 1.4);
+      ortKern.scale.z /= ueber; ortRand.scale.z /= ueber;
     }
     renderer.setRenderTarget(ziel);
     renderer.clear();
@@ -1941,6 +2422,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     renderer.clear();
     renderer.render(schirmSzene, schirmKamera);
     renderer.autoClear = false;
+    if (regen) renderer.render(regen.szene, kamera);
     if (geb && geb.gruppe.visible) renderer.render(gebSzene, kamera);
     if (effekte.linien) renderer.render(linienSzene, kamera);
     renderer.render(auflSzene, kamera);
@@ -1950,9 +2432,11 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     const r = flaeche.getBoundingClientRect();
     const mitOrt = ortSchild && ortGruppe.visible ? [{ schilder: [ortSchild] }] : [];
     const aufl = [achsen, strassen, kmlAufl, zielAufl].filter(a => a && a.gruppe.visible);
-    for (const m of [...aufl, ...messungen, ...(offen ? [offen] : []), ...mitOrt]) {
+    for (const m of [...aufl, regenAufl, ...messungen, ...(offen ? [offen] : []), ...mitOrt]) {
       for (const sch of m.schilder) {
-        v.copy(sch.p).project(kamera);
+        v.copy(sch.p);
+        v.z *= ueber;
+        v.project(kamera);
         const sicht = v.z < 1 && Math.abs(v.x) < 1.2 && Math.abs(v.y) < 1.2;
         sch.el.hidden = !sicht;
         if (sicht) sch.el.style.transform = `translate(${(v.x + 1) / 2 * r.width}px, ${(1 - v.y) / 2 * r.height}px) ${sch.lage}`;
@@ -1961,7 +2445,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     /* Bei schmalen Flächen lagen die Seitenlängen unter der Fläche in der Mitte:
      * Ein kleines Schild, das ein großes (Fläche, Σ, Δh, gesuchte Stelle) berührt,
      * tritt zurück — über alle Messungen und Auflagen hinweg. */
-    const alle = [...aufl, ...messungen, ...(offen ? [offen] : []), ...mitOrt].flatMap(m => m.schilder).filter(s => !s.el.hidden);
+    const alle = [...aufl, regenAufl, ...messungen, ...(offen ? [offen] : []), ...mitOrt].flatMap(m => m.schilder).filter(s => !s.el.hidden);
     const gross = alle.filter(s => s.el.classList.contains('gross')).map(s => s.el.getBoundingClientRect());
     if (gross.length) {
       for (const sch of alle) {
@@ -2014,6 +2498,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     achsMat.dispose(); zielMat.dispose(); zielLinieMat.dispose(); kmlMats.forEach(m => m.dispose());
     gebFlaecheMat.dispose(); gebKanteMat.dispose(); linienMat.dispose(); linienHauptMat.dispose();
     linienSzene.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+    if (regen) regen.entsorgen();
     geo.dispose(); material.dispose(); edl.dispose(); ziel.dispose(); schirm.geometry.dispose();
     kugelGeo.dispose(); kugelMat.dispose(); linieMat.dispose(); strichMat.dispose();
     /* dispose() gibt den WebGL-Kontext nicht frei: Browser halten nur rund 16, danach
