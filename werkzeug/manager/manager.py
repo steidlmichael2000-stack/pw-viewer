@@ -334,6 +334,22 @@ class Manager(tk.Tk):
         self.im_hintergrund(lambda: V.loeschen(p["name"], was, self.melden), self.aktualisieren)
 
 
+def modal(fenster: tk.Toplevel, warten: bool = False):
+    """Über dem Hauptfenster mittig zeigen und alle Eingaben abfangen.
+    grab_set() erst, wenn das Fenster sichtbar ist — unter Linux wirft Tk sonst
+    „grab failed: window not viewable“, und der Dialog tut beim Klicken nichts."""
+    eltern = fenster.master
+    fenster.update_idletasks()
+    x = eltern.winfo_rootx() + (eltern.winfo_width() - fenster.winfo_reqwidth()) // 2
+    y = eltern.winfo_rooty() + (eltern.winfo_height() - fenster.winfo_reqheight()) // 3
+    fenster.geometry(f"+{max(0, x)}+{max(0, y)}")
+    fenster.wait_visibility()
+    fenster.grab_set()
+    fenster.focus_set()
+    if warten:
+        fenster.wait_window()
+
+
 class Dialog(tk.Toplevel):
     """Neues Projekt oder Wolke/Modell eines Projekts ändern."""
 
@@ -388,8 +404,8 @@ class Dialog(tk.Toplevel):
         ttk.Button(k, text="Abbrechen", command=self.destroy).pack(side="right")
         ttk.Button(k, text="Vorbereiten", style="Akzent.TButton", command=self.ok).pack(side="right", padx=8)
         f.columnconfigure(1, weight=1)
+        modal(self)
         e_titel.focus_set()
-        self.grab_set()
 
     def ok(self):
         titel, name = self.titel.get().strip(), self.name.get().strip()
@@ -433,7 +449,8 @@ class Eingabe(tk.Toplevel):
             self.destroy()
         e.bind("<Return>", ok)
         ttk.Button(f, text="OK", style="Akzent.TButton", command=ok).pack(side="right")
-        self.grab_set()
+        modal(self)
+        e.focus_set()
         self.wait_window()
 
 
@@ -449,15 +466,14 @@ class Loeschwahl(tk.Toplevel):
         ttk.Label(f, text=f"Was soll von „{p['title']}“ weg?").pack(anchor="w", pady=(0, 8))
         for text, w, an in (("Ganzes Projekt", "alles", True), ("Nur Punktwolke", "wolke", p.get("pointcloud") is not False and p.get("model")),
                             ("Nur 3D-Modell", "modell", p.get("model") and p.get("pointcloud") is not False)):
-            b = ttk.Button(f, text=text, command=lambda w=w: self._w(w))
+            b = ttk.Button(f, text=text, command=lambda w=w: self._waehlen(w))
             b.pack(fill="x", pady=2)
             if not an:
                 b.state(["disabled"])
         ttk.Button(f, text="Abbrechen", command=self.destroy).pack(fill="x", pady=(10, 0))
-        self.grab_set()
-        self.wait_window()
+        modal(self, warten=True)
 
-    def _w(self, w):
+    def _waehlen(self, w):
         self.wert = w
         self.destroy()
 
