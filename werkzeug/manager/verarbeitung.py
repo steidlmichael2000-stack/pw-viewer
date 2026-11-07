@@ -387,8 +387,9 @@ def glb_bauen(obj: Path, ziel: Path, melden):
         lauf([n, gt, "resize", str(a), str(b), "--width", str(TEXTUR_MAX), "--height", str(TEXTUR_MAX)])
         melden(f"Texturen als WebP (Qualität {WEBP_QUALITAET}) …")
         lauf([n, gt, "webp", str(b), str(c), "--quality", str(WEBP_QUALITAET)])
-        melden("Geometrie optimieren (Draco) …")
-        lauf([n, gt, "optimize", str(c), str(ziel), "--texture-compress", "false", "--compress", "draco"])
+        # Ohne --simplify false dünnt optimize das Netz aus (St. Johannis: 540.309 → 437.870 Dreiecke)
+        melden("Geometrie packen (Draco, ohne Ausdünnen) …")
+        lauf([n, gt, "optimize", str(c), str(ziel), "--texture-compress", "false", "--compress", "draco", "--simplify", "false"])
     finally:
         for f in (a, b, c):
             f.unlink(missing_ok=True)
