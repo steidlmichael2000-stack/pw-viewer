@@ -1,6 +1,19 @@
 {
     "pointclouds": [
         {
+            "name": "st_johannis_neu",
+            "title": "St. Johannis (neu)",
+            "description": "Photogrammetrie aus Drohnen- und Bodenaufnahmen (WebODM)",
+            "laz": true,
+            "pointcloud": true,
+            "points": 12558050,
+            "utmX": 586057.58,
+            "utmY": 5491266.25,
+            "thumb": true,
+            "model": true,
+            "tris": 539634
+        },
+        {
             "name": "schrebergaerten",
             "title": "Schrebergärten",
             "description": "Photogrammetrie aus Drohnenaufnahmen (WebODM)",
