@@ -28,6 +28,10 @@
  *   { art: 'abgebrochen' }
  *   { art: 'warten', nr, von, versuch, sekunden, abgeschnitten }  Verbindung weg oder Kachel unvollständig, neuer Versuch folgt
  *
+ * Kacheln mit geraet: true kommen aus dem Speicher des Geräts (vomGeraet), wenn sie
+ * dort liegen; dann meldet 'laden' geraet: true. Dorthin speichert der Auftrag
+ * { art: 'speichern' } (unten, „Auf dem Gerät speichern“).
+ *
  * { art: 'abbrechen' } bricht den laufenden Auftrag ab: das Herunterladen über
  * den AbortController, das Entpacken an der nächsten Pause (alle 2^20 Punkte
  * gibt die Schleife den Faden kurz frei, sonst käme die Nachricht gar nicht an).
@@ -44,7 +48,57 @@ const ABGEBROCHEN = 'abgebrochen';
 const vorrat = new Map();       // Kachel → { zeiger, groesse }, in der Reihenfolge der Nutzung
 
 function vorratMelden() {
-  self.postMessage({ art: 'vorrat', kacheln: [...vorrat.keys()] });
+  self.postMessage({ art: 'vorrat', kacheln: [...new Set([...vorrat.keys(), ...entpackt.keys()])] });
+}
+
+/* Entpackte Kacheln (11.11.2026, nur am PC — app.js gibt am Handy entpacktMax 0):
+ * Die LAZ der BVV sind nach Flugstreifen geordnet, jeder neue Ausschnitt müsste
+ * die ganze Kachel neu entpacken. Deshalb hier je Kachel alle Punkte, knapp:
+ * Lage relativ zur Kachelecke und Höhe als Float32, Klasse, Intensität — 15 Byte
+ * je Punkt statt 30–40 im LAS. Verschieben heißt dann nur noch Durchsehen. */
+const ENTPACKT_BYTE = 15;
+const entpackt = new Map();     // Kachel → { x, y, z, kl, st, n, e0, n0, kopf, groesse, bytes }, zuletzt benutzt hinten
+let entpacktSumme = 0;
+/** Platz für bedarf Byte; false, wenn es auch ohne die Kacheln in behalten nicht reicht. */
+function entpacktPlatz(bedarf, behalten, max) {
+  for (const [k, v] of entpackt) {
+    if (entpacktSumme + bedarf <= max) break;
+    if (behalten.has(k)) continue;
+    entpackt.delete(k);
+    entpacktSumme -= v.bytes;
+  }
+  return entpacktSumme + bedarf <= max;
+}
+/** Alle Punkte einer gepackten Kachel in Felder; meldet den Fortschritt wie das Ausschneiden. */
+async function entpacken(LP, { kachel, zeiger, groesse, kopf: k }, nr, von) {
+  const laszip = new LP.LASZip(), punkt = LP._malloc(64);
+  try {
+    laszip.open(zeiger, groesse);
+    const anzahl = laszip.getCount() || k.anzahl;
+    const [ke, kn] = kachel.split('_').map(Number), e0 = ke * 1000, n0 = kn * 1000;
+    const x = new Float32Array(anzahl), y = new Float32Array(anzahl), z = new Float32Array(anzahl);
+    const kl = new Uint8Array(anzahl), st = new Uint16Array(anzahl);
+    const [sx, sy, sz] = k.skala, [ox, oy, oz] = k.versatz;
+    let puffer = null, d = null;
+    for (let i = 0; i < anzahl; i++) {
+      laszip.getPoint(punkt);
+      if (puffer !== LP.HEAPU8.buffer) { puffer = LP.HEAPU8.buffer; d = new DataView(puffer, punkt, k.laenge); }
+      if ((i & 0xfffff) === 0) {
+        senden({ art: 'lesen', nr, von, gelesen: i, gesamt: anzahl });
+        await new Promise(r => setTimeout(r));
+        if (abbruch.signal.aborted) throw new Error(ABGEBROCHEN);
+      }
+      x[i] = d.getInt32(0, true) * sx + ox - e0;
+      y[i] = d.getInt32(4, true) * sy + oy - n0;
+      z[i] = d.getInt32(8, true) * sz + oz;
+      kl[i] = k.format >= 6 ? d.getUint8(16) : d.getUint8(15) & 31;
+      st[i] = d.getUint16(12, true);
+    }
+    return { x, y, z, kl, st, n: anzahl, e0, n0, kopf: k, groesse, bytes: anzahl * ENTPACKT_BYTE };
+  } finally {
+    laszip.delete();
+    LP._free(punkt);
+  }
 }
 
 /* Meldungen eines Exports tragen export: true — app.js reicht sie an die
@@ -81,10 +135,11 @@ function warten(ms) {
   });
 }
 
-async function mitWiederholung(LP, url, melden, behalten, vorratMax, wartenMelden) {
+/** holen() lädt einmal von vorn (in den Speicher oder, beim Speichern, in eine Datei). */
+async function mitWiederholung(holen, wartenMelden) {
   for (let versuch = 1; ; versuch++) {
     try {
-      return await herunterladen(LP, url, melden, behalten, vorratMax);
+      return await holen();
     } catch (err) {
       /* Nur Netzfehler (TypeError) wiederholen; HTTP-Fehler und Abbrechen nicht. Ein
        * TypeError gleich beim Abruf bei bestehender Verbindung ist meist kein Funkloch,
@@ -202,8 +257,149 @@ function kopfLesen(b) {
   };
 }
 
+/* ======================= Auf dem Gerät speichern =======================
+ *
+ * 11.11.2026, so gewünscht: ausgewählte Kacheln dauerhaft auf dem Gerät, um sie
+ * öfter oder offline anzusehen (etwa die Allgäuer Alpen, mehrere GB). Gespeichert
+ * wird das LAZ der BVV unverändert im Origin Private File System, Ordner „laser“,
+ * je Kachel <kachel>.laz. Nicht IndexedDB oder Cache Storage: Dateien bis 1,9 GB
+ * gehen dort nur am Stück durch den Speicher, und der Service Worker räumt die
+ * Caches bei jedem Deploy. Geschrieben wird hier im Worker über
+ * createSyncAccessHandle (nur in Workern, dafür Stück für Stück direkt aus dem
+ * Netz, ohne die Kachel im Speicher zu halten), erst in <kachel>.teil — fertig
+ * und geprüft wird daraus <kachel>.laz. Was mit .teil liegen bleibt (App
+ * geschlossen), räumt app.js beim Auflisten weg.
+ *
+ * Auftrag { art: 'speichern', kacheln: [{ kachel, url }] } — läuft in einem
+ * eigenen Worker (app.js, laserSpeicherWerk), damit Ansehen und Speichern
+ * nebeneinander gehen. Meldungen:
+ *   { art: 'laden', nr, von, kachel, geladen, gesamt }   (gesamt 0 = unbekannt)
+ *   { art: 'warten', nr, von, versuch, sekunden, abgeschnitten }
+ *   { art: 'gespeichert', kachel, groesse }   { art: 'fehlt', kachel }  (gibt es nicht)
+ *   { art: 'fertig' }, { art: 'fehler', text }, { art: 'abgebrochen' } */
+const GERAET_ORDNER = 'laser';
+async function geraetOrdner() {
+  if (!navigator.storage || !navigator.storage.getDirectory) throw new Error('Dieser Browser kann keine Dateien auf dem Gerät ablegen.');
+  return (await navigator.storage.getDirectory()).getDirectoryHandle(GERAET_ORDNER, { create: true });
+}
+
+/** Eine gespeicherte Kachel in den Speicher von laz-perf; null, wenn sie nicht (mehr) da ist. */
+async function vomGeraet(LP, kachel, behalten, vorratMax) {
+  let h;
+  try {
+    const datei = await (await geraetOrdner()).getFileHandle(`${kachel}.laz`);
+    h = await datei.createSyncAccessHandle();
+  } catch (err) { return null; }               // dann wie bisher aus dem Netz
+  try {
+    const groesse = h.getSize();
+    if (groesse < 375) return null;
+    platzMachen(LP, groesse, behalten, vorratMax);
+    const zeiger = LP._malloc(groesse);
+    if (!zeiger) throw new Error('Zu wenig Speicher — einen kleineren Ausschnitt oder weniger Kacheln wählen.');
+    // Gleich in den Speicher von laz-perf; HEAPU8 erst nach malloc holen (er kann wachsen)
+    const n = h.read(LP.HEAPU8.subarray(zeiger, zeiger + groesse), { at: 0 });
+    if (n !== groesse || !vollstaendig(LP.HEAPU8, zeiger, groesse)) { LP._free(zeiger); return null; }
+    return { zeiger, groesse };
+  } finally {
+    h.close();
+  }
+}
+
+/** Reicht die Datei im Griff h bis zu ihrer Chunk-Tabelle? Wie vollstaendig, nur ohne die Datei zu lesen. */
+function dateiVollstaendig(h, groesse) {
+  if (groesse < 375) return false;
+  const lies = (at, n) => { const b = new Uint8Array(n); h.read(b, { at }); return new DataView(b.buffer); };
+  const kopf = lies(0, 104);
+  if (String.fromCharCode(kopf.getUint8(0), kopf.getUint8(1), kopf.getUint8(2), kopf.getUint8(3)) !== 'LASF') return false;
+  const daten = kopf.getUint32(96, true);
+  if (daten + 8 > groesse) return false;
+  let tabelle = Number(lies(daten, 8).getBigInt64(0, true));
+  if (tabelle === -1) tabelle = Number(lies(groesse - 8, 8).getBigInt64(0, true));
+  return !(tabelle > daten) || tabelle + 8 <= groesse;
+}
+
+/** Lädt url Stück für Stück in die Datei hinter h (von vorn); Größe oder null bei 404. */
+async function inDatei(url, h, melden) {
+  const r = await fetch(url, { cache: 'no-store', signal: abbruch.signal });
+  if (r.status === 404) return null;
+  if (r.status === 429) throw new Error('Gerade wurden sehr viele Laserkacheln geladen — die Weiterleitung lässt erst in einer Weile wieder welche durch.');
+  if (!r.ok) throw new Error(`Laserkachel: HTTP ${r.status}`);
+  if (!r.body) throw new Error('Laserkachel: keine Daten');
+  const gesamt = r.headers.get('Content-Encoding') ? 0 : Number(r.headers.get('Content-Length')) || 0;
+  const leser = r.body.getReader();
+  h.truncate(0);
+  let o = 0, gemeldet = 0;
+  for (;;) {
+    let stueck;
+    try { stueck = await leser.read(); } catch (err) { err.mittendrin = true; throw err; }
+    const { done, value } = stueck;
+    if (done) break;
+    try { h.write(value, { at: o }); } catch (err) {
+      leser.cancel();
+      if (err && err.name === 'QuotaExceededError') throw new Error('Der Speicher auf dem Gerät ist voll.');
+      throw err;
+    }
+    o += value.byteLength;
+    if (o - gemeldet > 1 << 20) { gemeldet = o; melden(o, gesamt); }
+  }
+  h.flush();
+  // Wie beim Laden: über Cloudflare kommen große Kacheln manchmal still abgeschnitten an
+  if ((gesamt && o !== gesamt) || !dateiVollstaendig(h, o)) {
+    const err = new TypeError('Laserkachel kam unvollständig an.');
+    err.mittendrin = err.abgeschnitten = true;
+    throw err;
+  }
+  melden(o, o);
+  return o;
+}
+
+async function speichern({ kacheln }) {
+  const ordner = await geraetOrdner();
+  const von = kacheln.length;
+  for (let i = 0; i < von; i++) {
+    const { kachel, url } = kacheln[i];
+    const teil = await ordner.getFileHandle(`${kachel}.teil`, { create: true });
+    const h = await teil.createSyncAccessHandle();
+    let groesse;
+    try {
+      groesse = await mitWiederholung(() => inDatei(url, h, (geladen, gesamt) =>
+        self.postMessage({ art: 'laden', nr: i, von, kachel, geladen, gesamt })),
+        (versuch, sekunden, abgeschnitten) => self.postMessage({ art: 'warten', nr: i, von, versuch, sekunden, abgeschnitten }));
+    } catch (err) {
+      h.close();
+      await ordner.removeEntry(`${kachel}.teil`).catch(() => {});
+      throw err;
+    }
+    h.close();
+    if (groesse == null) {
+      await ordner.removeEntry(`${kachel}.teil`).catch(() => {});
+      self.postMessage({ art: 'fehlt', kachel });
+      continue;
+    }
+    // Erst jetzt unter dem richtigen Namen — eine halbe Kachel gilt so nie als gespeichert
+    await ordner.removeEntry(`${kachel}.laz`).catch(() => {});
+    if (teil.move) await teil.move(`${kachel}.laz`);
+    else {
+      // Ohne move() (ältere Browser): umkopieren in Stücken zu 16 MB
+      const ziel = await (await ordner.getFileHandle(`${kachel}.laz`, { create: true })).createSyncAccessHandle();
+      const quelle = await teil.createSyncAccessHandle();
+      try {
+        const b = new Uint8Array(1 << 24);
+        for (let o = 0; o < groesse; o += b.length) {
+          const n = quelle.read(b, { at: o });
+          ziel.write(b.subarray(0, n), { at: o });
+        }
+        ziel.flush();
+      } finally { ziel.close(); quelle.close(); }
+      await ordner.removeEntry(`${kachel}.teil`);
+    }
+    self.postMessage({ art: 'gespeichert', kachel, groesse });
+  }
+  self.postMessage({ art: 'fertig' });
+}
+
 /** Holt die Kacheln, eine nach der anderen: aus dem Vorrat oder neu geladen. */
-async function kachelnHolen(LP, kacheln, vorratMax) {
+async function kachelnHolen(LP, kacheln, vorratMax, leerErlaubt = false) {
   const von = kacheln.length, behalten = new Set(kacheln.map(k => k.kachel));
   const da = [], fehlen = [];
   let megabyte = 0;
@@ -211,9 +407,12 @@ async function kachelnHolen(LP, kacheln, vorratMax) {
     const { kachel, url } = kacheln[i];
     let v = vorrat.get(kachel);
     if (v) vorrat.delete(kachel);               // nach hinten: zuletzt benutzt
-    else {
-      v = await mitWiederholung(LP, url, (geladen, gesamt) =>
-        senden({ art: 'laden', nr: i, von, geladen, gesamt }), behalten, vorratMax,
+    // Auf dem Gerät gespeichert (app.js setzt geraet): von dort statt aus dem Netz
+    else if (kacheln[i].geraet && (v = await vomGeraet(LP, kachel, behalten, vorratMax))) {
+      senden({ art: 'laden', nr: i, von, geladen: v.groesse, gesamt: v.groesse, geraet: true });
+    } else {
+      v = await mitWiederholung(() => herunterladen(LP, url, (geladen, gesamt) =>
+        senden({ art: 'laden', nr: i, von, geladen, gesamt }), behalten, vorratMax),
         (versuch, sekunden, abgeschnitten) => senden({ art: 'warten', nr: i, von, versuch, sekunden, abgeschnitten }));
       if (!v) { fehlen.push(kachel); continue; }
       megabyte += v.groesse / 1e6;
@@ -232,32 +431,85 @@ async function kachelnHolen(LP, kacheln, vorratMax) {
     vorratMelden();
     da.push({ kachel, ...v, kopf });
   }
-  if (!da.length) throw new Error('Für diese Stelle gibt es keine Laserkachel.');
+  if (!da.length && !leerErlaubt) throw new Error('Für diese Stelle gibt es keine Laserkachel.');
   return { da, fehlen, megabyte };
 }
 
-async function ausschneiden({ kacheln, bereich, max, nurBoden, vorratMax }) {
+/* Freihand-Umriss (11.11.2026): Statt jeden Punkt gegen das Vieleck zu prüfen,
+ * einmal ein Raster über das Rechteck füllen (Zeile für Zeile, gerade/ungerade)
+ * und je Punkt nur eine Zelle nachsehen. Bei 2 km Kante und 0,5 m Zellen 16 MB. */
+function umrissMaske(umriss, { e0, n0, e1, n1 }) {
+  const res = Math.max(0.25, Math.max(e1 - e0, n1 - n0) / 4000);
+  const w = Math.ceil((e1 - e0) / res), h = Math.ceil((n1 - n0) / res), m = new Uint8Array(w * h);
+  let zellen = 0;
+  for (let r = 0; r < h; r++) {
+    const y = n0 + (r + 0.5) * res, xs = [];
+    for (let i = 0, j = umriss.length - 1; i < umriss.length; j = i++) {
+      const [xa, ya] = umriss[j], [xb, yb] = umriss[i];
+      if ((ya > y) !== (yb > y)) xs.push(xa + (y - ya) * (xb - xa) / (yb - ya));
+    }
+    xs.sort((a, b) => a - b);
+    for (let k = 0; k + 1 < xs.length; k += 2) {
+      const c0 = Math.max(0, Math.ceil((xs[k] - e0) / res - 0.5)), c1 = Math.min(w - 1, Math.floor((xs[k + 1] - e0) / res - 0.5));
+      for (let c = c0; c <= c1; c++) { m[r * w + c] = 1; zellen++; }
+    }
+  }
+  return { m, w, h, res, e0, n0, flaeche: zellen * res * res };
+}
+const inMaske = (M, e, n) => {
+  const c = Math.floor((e - M.e0) / M.res), r = Math.floor((n - M.n0) / M.res);
+  return c >= 0 && r >= 0 && c < M.w && r < M.h && M.m[r * M.w + c] === 1;
+};
+
+async function ausschneiden({ kacheln, bereich, umriss, max, nurBoden, vorratMax, entpacktMax = 0 }) {
   if (!lazPerf) lazPerf = await Copc.Las.PointData.createLazPerf({ locateFile: f => 'vendor/copc/' + f });
   const LP = lazPerf;
 
   // Erst alle Kacheln da haben, eine nach der anderen. Die Zeiten je Schritt
   // stehen unten in der Ansicht — damit sich sagen lässt, wo es hängt.
+  // Schon entpackte brauchen ihr LAZ nicht (es kann längst aus dem Vorrat sein).
   const zeiten = { laden: 0, megabyte: 0, lesen: 0, normalen: 0 };
   let uhr = performance.now();
-  const { da, fehlen, megabyte } = await kachelnHolen(LP, kacheln, vorratMax);
+  const behalten = new Set(kacheln.map(k => k.kachel));
+  const offen = kacheln.filter(k => !entpackt.has(k.kachel));
+  const { da, fehlen, megabyte } = offen.length ? await kachelnHolen(LP, offen, vorratMax, true) : { da: [], fehlen: [], megabyte: 0 };
   zeiten.megabyte = megabyte;
   zeiten.laden = (performance.now() - uhr) / 1000;
   uhr = performance.now();
+
+  // In der Reihenfolge des Auftrags: je Kachel die entpackten Felder oder das LAZ
+  const quellen = [];
+  for (const { kachel } of kacheln) {
+    const e = entpackt.get(kachel);
+    if (e) { entpackt.delete(kachel); entpackt.set(kachel, e); quellen.push({ kachel, kopf: e.kopf, groesse: e.groesse, felder: e }); continue; }
+    const v = da.find(x => x.kachel === kachel);
+    if (v) quellen.push(v);
+  }
+  if (!quellen.length) throw new Error('Für diese Stelle gibt es keine Laserkachel.');
+  // Neu geladene entpacken und merken, soweit der Platz reicht — sonst wie bisher im Durchgang
+  if (entpacktMax) {
+    for (let t = 0; t < quellen.length; t++) {
+      const q = quellen[t];
+      if (q.felder || !entpacktPlatz(q.kopf.anzahl * ENTPACKT_BYTE, behalten, entpacktMax)) continue;
+      const e = await entpacken(LP, q, t, quellen.length);
+      entpackt.set(q.kachel, e);
+      entpacktSumme += e.bytes;
+      q.felder = e;
+    }
+    vorratMelden();
+  }
 
   /* Wie viele Punkte liegen etwa im Ausschnitt? Danach die Ausdünnung, damit
    * es höchstens rund max werden — gleichmäßig, jeder schritt-te Punkt. Beim
    * Boden allein grob die Hälfte (gezählt wird beim Lesen nur, was passt). */
   const { e0, n0, e1, n1 } = bereich;
+  const maske = umriss && umriss.length > 2 ? umrissMaske(umriss, bereich) : null;
+  const anteil = maske ? maske.flaeche / Math.max(1, (e1 - e0) * (n1 - n0)) : 1;
   let erwartet = 0;
-  for (const { kopf: k } of da) {
+  for (const { kopf: k } of quellen) {
     const flaeche = Math.max(1, (k.max[0] - k.min[0]) * (k.max[1] - k.min[1]));
     const ueber = Math.max(0, Math.min(e1, k.max[0]) - Math.max(e0, k.min[0])) * Math.max(0, Math.min(n1, k.max[1]) - Math.max(n0, k.min[1]));
-    erwartet += k.anzahl * Math.min(1, ueber / flaeche) * (nurBoden ? 0.5 : 1);
+    erwartet += k.anzahl * Math.min(1, ueber / flaeche) * (nurBoden ? 0.5 : 1) * anteil;
   }
   const schritt = Math.max(1, Math.ceil(erwartet / max));
   const ce = (e0 + e1) / 2, cn = (n0 + n1) / 2;
@@ -266,55 +518,72 @@ async function ausschneiden({ kacheln, bereich, max, nurBoden, vorratMax }) {
   let xyz = new Float32Array(platz * 3), klasse = new Uint8Array(platz), staerke = new Uint16Array(platz);
   const klassen = new Map();
   let n = 0, drin = 0, zMin = Infinity, zMax = -Infinity, iMax = 0;
-  const punkt = LP._malloc(64);
-  try {
-    for (let t = 0; t < da.length; t++) {
-      const { zeiger, groesse, kopf: k } = da[t];
-      const laszip = new LP.LASZip();
-      try {
-        laszip.open(zeiger, groesse);
-        // LAS 1.4 (alle neueren Befliegungen) lässt das alte 32-Bit-Feld leer, laz-perf meldet dann 0
-        const anzahl = laszip.getCount() || k.anzahl;
-        const [sx, sy, sz] = k.skala, [ox, oy, oz] = k.versatz;
-        // Ganzzahlige Grenzen: der Vergleich je Punkt ohne Umrechnung
-        const X0 = (e0 - ox) / sx, X1 = (e1 - ox) / sx, Y0 = (n0 - oy) / sy, Y1 = (n1 - oy) / sy;
-        let puffer = null, d = null;
-        for (let i = 0; i < anzahl; i++) {
-          laszip.getPoint(punkt);
-          if (puffer !== LP.HEAPU8.buffer) { puffer = LP.HEAPU8.buffer; d = new DataView(puffer, punkt, k.laenge); }
-          if ((i & 0xfffff) === 0) {
-            senden({ art: 'lesen', nr: t, von: da.length, gelesen: i, gesamt: anzahl });
-            await new Promise(r => setTimeout(r));          // Nachrichten (Abbrechen) durchlassen
-            if (abbruch.signal.aborted) throw new Error(ABGEBROCHEN);
-          }
-          const X = d.getInt32(0, true), Y = d.getInt32(4, true);
-          if (X < X0 || X > X1 || Y < Y0 || Y > Y1) continue;
-          // Formate 0–5: Klasse in den unteren 5 Bit von Byte 15; ab 6 ein ganzes Byte 16
-          const kl = k.format >= 6 ? d.getUint8(16) : d.getUint8(15) & 31;
-          if (nurBoden && !BODEN.has(kl)) continue;
-          if (drin++ % schritt) continue;
-          if (n === platz) {
-            platz *= 2;
-            const a = new Float32Array(platz * 3); a.set(xyz); xyz = a;
-            const b = new Uint8Array(platz); b.set(klasse); klasse = b;
-            const c = new Uint16Array(platz); c.set(staerke); staerke = c;
-          }
-          const z = d.getInt32(8, true) * sz + oz;
-          xyz[3 * n] = X * sx + ox - ce; xyz[3 * n + 1] = Y * sy + oy - cn; xyz[3 * n + 2] = z;
-          klasse[n] = kl;
-          staerke[n] = d.getUint16(12, true);
-          klassen.set(kl, (klassen.get(kl) || 0) + 1);
-          if (z < zMin) zMin = z;
-          if (z > zMax) zMax = z;
-          if (staerke[n] > iMax) iMax = staerke[n];
-          n++;
-        }
-      } finally {
-        laszip.delete();
-      }
+  /** Ein Punkt im Rechteck: Umriss, Klasse, Ausdünnung prüfen und übernehmen. */
+  const nimm = (e, nn, z, kl, s) => {
+    if (maske && !inMaske(maske, e, nn)) return;
+    if (nurBoden && !BODEN.has(kl)) return;
+    if (drin++ % schritt) return;
+    if (n === platz) {
+      platz *= 2;
+      const a = new Float32Array(platz * 3); a.set(xyz); xyz = a;
+      const b = new Uint8Array(platz); b.set(klasse); klasse = b;
+      const c = new Uint16Array(platz); c.set(staerke); staerke = c;
     }
-  } finally {
-    LP._free(punkt);
+    xyz[3 * n] = e - ce; xyz[3 * n + 1] = nn - cn; xyz[3 * n + 2] = z;
+    klasse[n] = kl;
+    staerke[n] = s;
+    klassen.set(kl, (klassen.get(kl) || 0) + 1);
+    if (z < zMin) zMin = z;
+    if (z > zMax) zMax = z;
+    if (s > iMax) iMax = s;
+    n++;
+  };
+  for (let t = 0; t < quellen.length; t++) {
+    const q = quellen[t];
+    if (q.felder) {
+      // Aus den entpackten Feldern: nur noch durchsehen
+      const { x, y, z, kl, st, n: anzahl, e0: ke, n0: kn } = q.felder;
+      const X0 = e0 - ke, X1 = e1 - ke, Y0 = n0 - kn, Y1 = n1 - kn;
+      for (let i = 0; i < anzahl; i++) {
+        if ((i & 0x3fffff) === 0) {
+          senden({ art: 'lesen', nr: t, von: quellen.length, gelesen: i, gesamt: anzahl });
+          await new Promise(r => setTimeout(r));
+          if (abbruch.signal.aborted) throw new Error(ABGEBROCHEN);
+        }
+        const xi = x[i], yi = y[i];
+        if (xi < X0 || xi > X1 || yi < Y0 || yi > Y1) continue;
+        nimm(xi + ke, yi + kn, z[i], kl[i], st[i]);
+      }
+      continue;
+    }
+    const { zeiger, groesse, kopf: k } = q;
+    const laszip = new LP.LASZip(), punkt = LP._malloc(64);
+    try {
+      laszip.open(zeiger, groesse);
+      // LAS 1.4 (alle neueren Befliegungen) lässt das alte 32-Bit-Feld leer, laz-perf meldet dann 0
+      const anzahl = laszip.getCount() || k.anzahl;
+      const [sx, sy, sz] = k.skala, [ox, oy, oz] = k.versatz;
+      // Ganzzahlige Grenzen: der Vergleich je Punkt ohne Umrechnung
+      const X0 = (e0 - ox) / sx, X1 = (e1 - ox) / sx, Y0 = (n0 - oy) / sy, Y1 = (n1 - oy) / sy;
+      let puffer = null, d = null;
+      for (let i = 0; i < anzahl; i++) {
+        laszip.getPoint(punkt);
+        if (puffer !== LP.HEAPU8.buffer) { puffer = LP.HEAPU8.buffer; d = new DataView(puffer, punkt, k.laenge); }
+        if ((i & 0xfffff) === 0) {
+          senden({ art: 'lesen', nr: t, von: quellen.length, gelesen: i, gesamt: anzahl });
+          await new Promise(r => setTimeout(r));          // Nachrichten (Abbrechen) durchlassen
+          if (abbruch.signal.aborted) throw new Error(ABGEBROCHEN);
+        }
+        const X = d.getInt32(0, true), Y = d.getInt32(4, true);
+        if (X < X0 || X > X1 || Y < Y0 || Y > Y1) continue;
+        // Formate 0–5: Klasse in den unteren 5 Bit von Byte 15; ab 6 ein ganzes Byte 16
+        nimm(X * sx + ox, Y * sy + oy, d.getInt32(8, true) * sz + oz,
+          k.format >= 6 ? d.getUint8(16) : d.getUint8(15) & 31, d.getUint16(12, true));
+      }
+    } finally {
+      laszip.delete();
+      LP._free(punkt);
+    }
   }
   if (!n) throw new Error('Im Ausschnitt liegen keine Laserpunkte.');
   // Höhen relativ zum tiefsten Punkt — Float32 reicht dann auf den Millimeter
@@ -323,7 +592,7 @@ async function ausschneiden({ kacheln, bereich, max, nurBoden, vorratMax }) {
    * voller Dichte (7–10 Punkte je m²) 0,8 m, ausgedünnt entsprechend mehr. */
   zeiten.lesen = (performance.now() - uhr) / 1000;
   uhr = performance.now();
-  const dichte = n / Math.max(1, (e1 - e0) * (n1 - n0));
+  const dichte = n / Math.max(1, maske ? maske.flaeche : (e1 - e0) * (n1 - n0));
   const normalen = normalenRechnen(xyz, n, Math.max(0.8, Math.sqrt(12 / (Math.PI * dichte))));
   zeiten.normalen = (performance.now() - uhr) / 1000;
   if (abbruch.signal.aborted) throw new Error(ABGEBROCHEN);     // abgebrochen, während die Normalen liefen
@@ -331,7 +600,7 @@ async function ausschneiden({ kacheln, bereich, max, nurBoden, vorratMax }) {
     art: 'fertig', anzahl: n, schritt, fehlen, zeiten,
     mitte: [ce, cn], zMin, zMax, iMax,
     // Für den Export (Größe vorab): je Kachel Punkte, Format und Größe des LAZ
-    kacheln: da.map(k => ({ kachel: k.kachel, anzahl: k.kopf.anzahl, format: k.kopf.format, groesse: k.groesse })),
+    kacheln: quellen.map(k => ({ kachel: k.kachel, anzahl: k.kopf.anzahl, format: k.kopf.format, groesse: k.groesse })),
     xyz: xyz.slice(0, n * 3), klasse: klasse.slice(0, n), staerke: staerke.slice(0, n), normalen,
     klassen: [...klassen].sort((a, b) => a[0] - b[0])
   };
@@ -677,7 +946,7 @@ async function luftbildHolen(f) {
  *  farbeFuer(t): das Luftbild für Kachel t (luftbildHolen), oder null ohne Farbe.
  *  getrennt: zwei Dateien in einem Durchgang — [0] Boden (BODEN), [1] der Rest.
  *  Für ReCap: jede Datei wird dort ein eigener Scan, in Civil einzeln ausblendbar. */
-async function lasBauen(LP, da, b, { nurBoden, getrennt, ziel, farbeFuer }) {
+async function lasBauen(LP, da, b, { nurBoden, getrennt, ziel, farbeFuer, maske }) {
   const neu = da.some(k => k.kopf.format >= 6);
   const mitRgb = !!farbeFuer || da.some(k => LAS_RGB[k.kopf.format] != null);
   const format = neu ? (mitRgb ? 7 : 6) : (mitRgb ? 3 : 1), L = LAS_LAENGE[format];
@@ -718,6 +987,7 @@ async function lasBauen(LP, da, b, { nurBoden, getrennt, ziel, farbeFuer }) {
           const quelle = new DataView(heap.buffer, q, 40);
           const X = quelle.getInt32(0, true), Y = quelle.getInt32(4, true);
           if (X < X0 || X >= X1 || Y < Y0 || Y >= Y1) continue;
+          if (maske && !inMaske(maske, X * sx + ox, Y * sy + oy)) continue;
           const kl = altNeu ? heap[q + 16] : heap[q + 15] & 31;
           if (nurBoden && !BODEN.has(kl)) continue;
           const a = ausgaben[getrennt && !BODEN.has(kl) ? 1 : 0];
@@ -805,7 +1075,7 @@ function dxfBauen({ ecken, wand }, ziel) {
   return new Blob(teile, { type: 'application/dxf' });
 }
 
-async function exportieren({ kacheln, bereich, einzeln, nurBoden, getrennt, ziel, luftbild, gebaeude, name, zusatz, vorratMax }) {
+async function exportieren({ kacheln, bereich, umriss, einzeln, nurBoden, getrennt, ziel, luftbild, gebaeude, name, zusatz, vorratMax }) {
   if (!lazPerf) lazPerf = await Copc.Las.PointData.createLazPerf({ locateFile: f => 'vendor/copc/' + f });
   const LP = lazPerf;
   const { da, fehlen } = await kachelnHolen(LP, kacheln, vorratMax);
@@ -826,7 +1096,9 @@ async function exportieren({ kacheln, bereich, einzeln, nurBoden, getrennt, ziel
       bild = await luftbildHolen(einzeln ? luftbild[da[t].kachel] : luftbild);
       return bild;
     };
-    const ergebnis = await lasBauen(LP, da, b, { nurBoden, getrennt, ziel, farbeFuer });
+    // Ausschnitt einer Freihand-Auswahl: nur, was im Umriss liegt
+    const maske = !einzeln && umriss && umriss.length > 2 ? umrissMaske(umriss, b) : null;
+    const ergebnis = await lasBauen(LP, da, b, { nurBoden, getrennt, ziel, farbeFuer, maske });
     if (!ergebnis.some(e => e.blob)) throw new Error(einzeln ? 'In den Kacheln liegen keine passenden Punkte.' : 'Im Ausschnitt liegen keine Laserpunkte.');
     const endung = getrennt ? ['_boden', '_rest'] : [''];
     ergebnis.forEach(({ blob, punkte }, i) => { if (blob) datei(`${name}${zusatz}${endung[i]}.las`, blob, punkte); });
@@ -843,7 +1115,8 @@ self.onmessage = async ev => {
   abbruch = new AbortController();
   exportLaeuft = istExport;
   try {
-    if (istExport) await exportieren(ev.data);
+    if (ev.data.art === 'speichern') await speichern(ev.data);
+    else if (istExport) await exportieren(ev.data);
     else await ausschneiden(ev.data);
   } catch (err) {
     if (abbruch.signal.aborted) senden({ art: 'abgebrochen' });

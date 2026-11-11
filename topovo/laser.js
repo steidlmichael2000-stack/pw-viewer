@@ -170,13 +170,25 @@ const EDL_VS = `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(pos
  * Hand gegen deren Tiefe (dieselbe Kamera, dasselbe Ziel wie EDL_FS). Erst ab
  * 30 cm vor der Fläche verdeckt ein Punkt: Die Dachpunkte liegen auf dem Dach
  * und hätten es sonst zersiebt. */
+/* DACHBILD (nur die Flächen der Gebäude, auf Wunsch): Dächer bekommen das
+ * Luftbild darunter, senkrecht von oben — Wände bleiben grau. */
 const GEB_VS = `
   uniform vec3 lichtRichtung;
   uniform float kante;
   varying float vHell;
+  #ifdef DACHBILD
+  attribute float wand;
+  uniform float halbSeite;
+  varying float vDach;
+  varying vec2 vUv;
+  #endif
   void main() {
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     vHell = kante > 0.5 ? 1.0 : 0.6 + 0.4 * abs(dot(normal, lichtRichtung));
+    #ifdef DACHBILD
+    vDach = 1.0 - wand;
+    vUv = clamp((position.xy + halbSeite) / (2.0 * halbSeite), 0.0, 1.0);
+    #endif
   }`;
 const GEB_FS = `
   precision highp float;
@@ -184,10 +196,19 @@ const GEB_FS = `
   uniform float nah, fern, ortho, deckung;
   uniform vec3 farbe;
   varying float vHell;
+  #ifdef DACHBILD
+  uniform sampler2D bild;
+  varying float vDach;
+  varying vec2 vUv;
+  #endif
   float linear(float d) { return ortho > 0.5 ? nah + d * (fern - nah) : nah * fern / (fern - d * (fern - nah)); }
   void main() {
     float t = texelFetch(tiefe, ivec2(gl_FragCoord.xy), 0).r;
     if (t < 1.0 && linear(gl_FragCoord.z) > linear(t) + 0.3) discard;
+    #ifdef DACHBILD
+    // Dach deckend in der Farbe des Luftbilds, das Licht nur angedeutet (das Bild hat schon Schatten)
+    if (vDach > 0.5) { gl_FragColor = vec4(texture2D(bild, vUv).rgb * mix(1.0, vHell, 0.35), 1.0); return; }
+    #endif
     gl_FragColor = vec4(farbe * vHell, deckung);
   }`;
 /* Streckenachsen der DB InfraGO: der helle Lapis-Ton (wie im Dunkelmodus der
@@ -356,19 +377,19 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
         <span class="slider-val lz-groesse-wert"></span>
       </label>
       <details class="sheet-sec" open>
-        <summary><h2>Färbung</h2></summary>
+        <summary><svg class="sec-ikon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5s-6 6.5-6 10.5a6 6 0 0 0 12 0c0-4-6-10.5-6-10.5z"/></svg><h2>Färbung</h2></summary>
         <div class="seg seg-paar lz-faerbung" role="group" aria-label="Färbung">
-          <button type="button" class="seg-btn" data-faerbung="rgb">Farbe</button>
-          <button type="button" class="seg-btn is-on" data-faerbung="klasse">Klasse</button>
-          <button type="button" class="seg-btn" data-faerbung="hoehe">Höhe</button>
-          <button type="button" class="seg-btn" data-faerbung="intensitaet">Intensität</button>
-          <button type="button" class="seg-btn" data-faerbung="normalen">Normalen</button>
-          <button type="button" class="seg-btn" data-faerbung="neigung">Neigung</button>
-          <button type="button" class="seg-btn" data-faerbung="luftbild">Luftbild</button>
+          <button type="button" class="seg-btn" data-faerbung="rgb" data-ik="farbe">Farbe</button>
+          <button type="button" class="seg-btn is-on" data-faerbung="klasse" data-ik="klasse">Klasse</button>
+          <button type="button" class="seg-btn" data-faerbung="hoehe" data-ik="hoehe">Höhe</button>
+          <button type="button" class="seg-btn" data-faerbung="intensitaet" data-ik="intensitaet">Intensität</button>
+          <button type="button" class="seg-btn" data-faerbung="normalen" data-ik="normalen">Normalen</button>
+          <button type="button" class="seg-btn" data-faerbung="neigung" data-ik="neigung">Neigung</button>
+          <button type="button" class="seg-btn" data-faerbung="luftbild" data-ik="foto">Luftbild</button>
         </div>
       </details>
       <details class="sheet-sec">
-        <summary><h2>Effekte</h2></summary>
+        <summary><svg class="sec-ikon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.2 5.6 5.8.4-4.5 3.7 1.5 5.8-5-3.2-5 3.2 1.5-5.8L4 9.5l5.8-.4z"/></svg><h2>Effekte</h2></summary>
         <label class="slider-row">Schatten
           <input type="range" class="lz-licht" min="0" max="100" step="5" value="50">
           <span class="slider-val lz-licht-wert"></span>
@@ -378,44 +399,52 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
           <span class="slider-val lz-edl-wert"></span>
         </label>
         <div class="lz-klassen lz-effekte">
-          <button type="button" class="seg-btn lz-klasse" data-effekt="verdeckung" aria-pressed="false"><span class="lz-name">Verdeckung</span><small>aus</small></button>
-          <button type="button" class="seg-btn lz-klasse" data-effekt="kugeln" aria-pressed="false"><span class="lz-name">Kugeln</span><small>aus</small></button>
-          <button type="button" class="seg-btn lz-klasse" data-effekt="linien" aria-pressed="false"><span class="lz-name">Höhenlinien</span><small>aus</small></button>
+          <button type="button" class="seg-btn lz-klasse" data-effekt="verdeckung" data-ik="verdeckung" aria-pressed="false"><span class="lz-name">Verdeckung</span><small>aus</small></button>
+          <button type="button" class="seg-btn lz-klasse" data-effekt="kugeln" data-ik="kugeln" aria-pressed="false"><span class="lz-name">Kugeln</span><small>aus</small></button>
+          <button type="button" class="seg-btn lz-klasse" data-effekt="linien" data-ik="linien" aria-pressed="false"><span class="lz-name">Höhenlinien</span><small>aus</small></button>
         </div>
       </details>
       <details class="sheet-sec lz-klassen-titel" open>
-        <summary><h2>Klassen</h2></summary>
+        <summary><svg class="sec-ikon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1"/></svg><h2>Klassen</h2></summary>
         <div class="lz-klassen lz-klassenliste"></div>
       </details>
       <details class="sheet-sec lz-aufl-titel">
-        <summary><h2>Auflagen</h2></summary>
+        <summary><svg class="sec-ikon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l9 4.5-9 4.5L3 8zM3 12l9 4.5 9-4.5M3 16l9 4.5 9-4.5"/></svg><h2>Auflagen</h2></summary>
         <div class="lz-klassen lz-aufl">
           <button type="button" class="seg-btn lz-klasse lz-geb" aria-pressed="false">
             <span class="lz-feld" style="background:#e4e7ec"></span><span class="lz-name">3D-Gebäudemodell LoD2</span><small></small></button>
+          <div class="seg seg-paar lz-geb-dach" role="group" aria-label="Dächer" hidden>
+            <button type="button" class="seg-btn is-on" data-dach="grau" data-ik="haus">Dächer grau</button>
+            <button type="button" class="seg-btn" data-dach="luftbild" data-ik="foto" title="Dachflächen in den Farben des Luftbilds (DOP20), Wände bleiben grau">Dächer Luftbild</button>
+          </div>
           <button type="button" class="seg-btn lz-klasse lz-achsen" aria-pressed="false">
             <span class="lz-feld" style="background:${ACHS_FARBE}"></span><span class="lz-name">Streckenachsen</span><small></small></button>
           <button type="button" class="seg-btn lz-klasse lz-strassen" aria-pressed="false">
             <span class="lz-feld" style="background:${STR_FARBEN[0]}"></span><span class="lz-name">Straßen</span><small>aus</small></button>
+          <label class="slider-row lz-str-breite" hidden>Breite
+            <input type="range" class="lz-str-breite-regler" min="0" max="10" step="0.5" value="0">
+            <span class="slider-val lz-str-breite-wert">Linie</span>
+          </label>
           <button type="button" class="seg-btn lz-klasse lz-kml" aria-pressed="false" hidden>
             <span class="lz-feld" style="background:#ffffff"></span><span class="lz-name">KML</span><small></small></button>
         </div>
       </details>
       <details class="sheet-sec">
-        <summary><h2>Ansicht</h2></summary>
+        <summary><svg class="sec-ikon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg><h2>Ansicht</h2></summary>
         <p class="pal-label">Kamera</p>
         <div class="seg seg-paar" role="group" aria-label="Kamera">
-          <button type="button" class="seg-btn is-on" data-kamera="perspektive">Perspektive</button>
-          <button type="button" class="seg-btn" data-kamera="ortho">Orthografisch</button>
+          <button type="button" class="seg-btn is-on" data-kamera="perspektive" data-ik="perspektive">Perspektive</button>
+          <button type="button" class="seg-btn" data-kamera="ortho" data-ik="ortho">Orthografisch</button>
         </div>
         <p class="pal-label">Hintergrund</p>
         <div class="seg seg-paar" role="group" aria-label="Hintergrund">
-          <button type="button" class="seg-btn is-on" data-grund="verlauf">Verlauf</button>
-          <button type="button" class="seg-btn" data-grund="schwarz">Schwarz</button>
-          <button type="button" class="seg-btn" data-grund="weiss">Weiß</button>
+          <button type="button" class="seg-btn is-on" data-grund="verlauf" data-ik="verlauf">Verlauf</button>
+          <button type="button" class="seg-btn" data-grund="schwarz" data-ik="schwarz">Schwarz</button>
+          <button type="button" class="seg-btn" data-grund="weiss" data-ik="weiss">Weiß</button>
         </div>
       </details>
       <details class="sheet-sec">
-        <summary><h2>Ausschnitt</h2></summary>
+        <summary><svg class="sec-ikon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 10.8v5.7"/><circle class="voll" cx="12" cy="7.8" r="1.1"/></svg><h2>Ausschnitt</h2></summary>
         <div class="lz-info"></div>
       </details>
     </div>
@@ -459,6 +488,11 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   wurzel.dataset.grund = 'verlauf';
   document.body.appendChild(wurzel);
   const $ = s => wurzel.querySelector(s);
+  /* Einstellungen vom letzten Mal (einstStand/einstAnwenden unten). Topovo und
+   * PW-Viewer liegen auf demselben Ursprung — je ein eigener Schlüssel. */
+  const EINST_SCHLUESSEL = info.utm ? 'topovo-laser-einst' : 'pwviewer-laser-einst';
+  let gemerkt = {};
+  try { gemerkt = JSON.parse(localStorage.getItem(EINST_SCHLUESSEL)) || {}; } catch { gemerkt = {}; }
 
   /* Was info nicht mitbringt, gibt es nicht (PW-Viewer: kein Luftbild, keine
    * Gebäude, keine Auflagen, kein Export) — die Knöpfe gar nicht erst zeigen. */
@@ -469,6 +503,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   if (d.rgb && d.klassen.length < 2) weg('[data-faerbung="klasse"], .lz-klassen-titel');
   if (!info.luftbild) weg('[data-faerbung="luftbild"]');
   if (!info.gebaeude) weg('.lz-geb');
+  if (!info.gebaeude || !info.luftbild) weg('.lz-geb-dach');
   if (!info.achsen) weg('.lz-achsen');
   if (!info.strassen) weg('.lz-strassen');
   if (!info.gebaeude && !info.achsen && !info.kml && !info.strassen) weg('.lz-aufl-titel');
@@ -482,7 +517,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
    * ganze Breite. Nach den sichtbaren gezählt — :nth-child zählt ausgeblendete
    * mit, dann stand „Neigung“ allein und „Luftbild“ breit darunter. */
   const breitSetzen = () => wurzel.querySelectorAll('.lz-faerbung, .lz-klassen').forEach(g => {
-    const da = [...g.children].filter(el => !el.hidden && !el.classList.contains('lz-geb'));
+    const da = [...g.children].filter(el => !el.hidden && !el.classList.contains('lz-geb') && !el.classList.contains('lz-geb-dach'));
     g.querySelectorAll('.breit').forEach(el => el.classList.remove('breit'));
     if (da.length % 2) da[da.length - 1].classList.add('breit');
   });
@@ -566,7 +601,8 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     ortho: edl.uniforms.ortho, lichtRichtung: material.uniforms.lichtRichtung });
   const gebFlaecheMat = new THREE.ShaderMaterial({ vertexShader: GEB_VS, fragmentShader: GEB_FS, transparent: true,
     side: THREE.DoubleSide, depthWrite: true,
-    uniforms: { ...gebUniforms(), kante: { value: 0 }, deckung: { value: 0.5 }, farbe: { value: new THREE.Color(0.86, 0.88, 0.92) } } });
+    uniforms: { ...gebUniforms(), kante: { value: 0 }, deckung: { value: 0.5 }, farbe: { value: new THREE.Color(0.86, 0.88, 0.92) },
+      halbSeite: { value: info.seite / 2 }, bild: { value: null } } });
   const gebKanteMat = new THREE.ShaderMaterial({ vertexShader: GEB_VS, fragmentShader: GEB_FS, transparent: true,
     uniforms: { ...gebUniforms(), kante: { value: 1 }, deckung: { value: 0.9 }, farbe: { value: new THREE.Color(1, 1, 1) } } });
 
@@ -718,12 +754,27 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     clearTimeout(hinweisUhr);
     hinweisUhr = setTimeout(() => t.classList.add('weg'), 5000);
   }
+  /* Pflichtangabe oben. Am Handy (unter 1010 px) nur kurz in einer Zeile — die
+   * ganze stand dort in drei Zeilen zwischen den Knöpfen (zu laut, 07.11.2026);
+   * ein Tipp auf die Zeile klappt die ganze auf und wieder zu. */
+  const fuss = $('.lz-fuss');
   const quellenNeu = () => {
     const was = [info.datenName || 'Laserdaten', luftbild && 'Luftbild', geb && 'Gebäude LoD2'].filter(Boolean);
-    lizenzTextSetzen($('.lz-fuss'), `${was.join(', ').replace(/, ([^,]*)$/, ' und $1')}: ${info.quelle}` +
-      (achsen && achsen.anzahl ? ' · Streckenachsen: DB InfraGO (CC BY 4.0), bearbeitet' : '') +
-      (strassen && strassen.gruppe.visible ? ' · Straßen: OpenFreeMap, © OpenStreetMap (ODbL)' : ''));
+    const mitAchsen = achsen && achsen.anzahl, mitStr = strassen && strassen.gruppe.visible;
+    const lang = document.createElement('span');
+    lang.className = 'lz-fuss-lang';
+    lizenzTextSetzen(lang, `${was.join(', ').replace(/, ([^,]*)$/, ' und $1')}: ${info.quelle}` +
+      (mitAchsen ? ' · Streckenachsen: DB InfraGO (CC BY 4.0), bearbeitet' : '') +
+      (mitStr ? ' · Straßen: OpenFreeMap, © OpenStreetMap (ODbL)' : ''));
+    if (!info.quelleKurz) { fuss.replaceChildren(lang); return; }
+    const kurz = document.createElement('span');
+    kurz.className = 'lz-fuss-kurz';
+    lizenzTextSetzen(kurz, (mitAchsen ? info.quelleKurz.replace('© BVV', '© BVV, DB InfraGO') : info.quelleKurz) +
+      (mitStr ? ' · © OpenStreetMap (ODbL)' : '') + ' · ⓘ');
+    fuss.replaceChildren(kurz, lang);
+    fuss.classList.add('mit-kurz');
   };
+  fuss.addEventListener('click', ev => { if (!ev.target.closest('a')) fuss.classList.toggle('offen'); });
 
   /* ---------- Färbung nach Luftbild ----------
    * Die Kacheln der BVV haben keine Farbe (Punktformat 1). Das DOP20 der BVV
@@ -1130,11 +1181,15 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     return bh ? bh.z + d.zMin : top - 3;
   }
   function gebaeudeBauen(liste) {
-    const { ecken, kanten } = gebaeudeDreiecke(liste, grundVon);
+    const { ecken, wand, kanten } = gebaeudeDreiecke(liste, grundVon);
     const ox = d.mitte[0], oy = d.mitte[1], oz = d.zMin;
     const relativ = a => { const f = new Float32Array(a.length); for (let i = 0; i < a.length; i += 3) { f[i] = a[i] - ox; f[i + 1] = a[i + 1] - oy; f[i + 2] = a[i + 2] - oz; } return f; };
     const fg = new THREE.BufferGeometry();
     fg.setAttribute('position', new THREE.BufferAttribute(relativ(ecken), 3));
+    // Dach oder Wand je Ecke (gebaeudeDreiecke zählt je Dreieck) — für die Dächer im Luftbild
+    const wandEcke = new Float32Array(wand.length * 3);
+    wand.forEach((w, i) => { wandEcke[3 * i] = wandEcke[3 * i + 1] = wandEcke[3 * i + 2] = w; });
+    fg.setAttribute('wand', new THREE.BufferAttribute(wandEcke, 1));
     fg.computeVertexNormals();
     const kg = new THREE.BufferGeometry();
     kg.setAttribute('position', new THREE.BufferAttribute(relativ(kanten), 3));
@@ -1149,9 +1204,38 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     gebKnopf.classList.toggle('is-on', an);
     gebKnopf.setAttribute('aria-pressed', String(an));
     if (geb) geb.gruppe.visible = an;
+    if (info.luftbild) $('.lz-geb-dach').hidden = !an;
     gebKnopf.querySelector('small').textContent = !an ? 'aus' : `${geb.anzahl.toLocaleString('de-DE')} Gebäude`;
     neu = true;
   }
+  /* Dächer im Luftbild: dasselbe DOP20 wie die Färbung der Punkte (luftbildFlaeche),
+   * als Textur senkrecht von oben. Das DOP ist kein True-Ortho — hohe Dächer sind
+   * etwas zur Seite versetzt, am Rand sieht man dann Hof oder Nachbardach. */
+  let dachBild = false, dachTextur = null;
+  async function dachSetzen(art) {
+    const knoepfe = wurzel.querySelectorAll('[data-dach]');
+    if (art === 'luftbild' && !luftbildFlaeche) {
+      const b = $('[data-dach="luftbild"]');
+      if (luftbild && !luftbildLaeuft) luftbild = null;       // schon geholt, aber ohne Bild
+      const ok = await luftbildLaden(b);
+      b.textContent = 'Dächer Luftbild';
+      if (!ok || !luftbildFlaeche || !laeuft) return;
+    }
+    dachBild = art === 'luftbild';
+    knoepfe.forEach(x => x.classList.toggle('is-on', x.dataset.dach === art));
+    if (dachBild && !dachTextur) {
+      dachTextur = new THREE.CanvasTexture(luftbildFlaeche);
+      dachTextur.generateMipmaps = true;
+      dachTextur.minFilter = THREE.LinearMipmapLinearFilter;
+      dachTextur.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    }
+    gebFlaecheMat.defines = dachBild ? { DACHBILD: '' } : {};
+    gebFlaecheMat.uniforms.bild = { value: dachTextur };
+    gebFlaecheMat.needsUpdate = true;
+    neu = true;
+  }
+  wurzel.querySelectorAll('[data-dach]').forEach(b => b.addEventListener('click', () => dachSetzen(b.dataset.dach)));
+
   /* LoD2 des Ausschnitts, einmal geholt — für die Auflage und als Hindernis beim Regen */
   let lod2Roh = null;
   function lod2Holen() {
@@ -1271,7 +1355,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     achsen = { gruppe, schilder, anzahl: laengste.size };
     quellenNeu();
     const text = laengste.size ? `${laengste.size} ${laengste.size === 1 ? 'Strecke' : 'Strecken'}` : 'keine';
-    auflZeigen(achsen, achsKnopf, true, text);
+    auflZeigen(achsen, achsKnopf, gemerkt.achsen !== false, text);
     if (!laengste.size) hinweis(liste.length ? 'Unter den Streckenachsen liegen hier keine Bodenpunkte.' : 'Im Ausschnitt liegt keine Streckenachse der DB InfraGO.');
   }
   achsKnopf.addEventListener('click', () => {
@@ -1282,13 +1366,74 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
 
   /* Straßennetz: erst beim ersten Einschalten geholt. Haupt- und Nebenstraßen
    * durchgezogen, Wege gestrichelt und blasser. Namen je Straße einmal, am
-   * längsten Stück, höchstens STR_NAMEN_MAX — sonst deckt Text die Wolke zu. */
+   * längsten Stück, höchstens STR_NAMEN_MAX — sonst deckt Text die Wolke zu.
+   *
+   * Breite (11.11.2026 gewünscht, für Wanderwege): ganz links „Linie“ wie bisher,
+   * sonst ein Band in Metern auf dem Laserboden — so liegt der Weg so breit über
+   * der Wolke, wie man ihn einstellt, und bleibt beim Zoomen maßstäblich. Ein
+   * Band, weil WebGL Linien nur einen Pixel breit zeichnet. */
   const STR_NAMEN_MAX = 40;
   const strMats = STR_FARBEN.map((f, i) => i < 2
     ? new THREE.LineBasicMaterial({ color: f, depthTest: false, transparent: true, opacity: i ? 0.7 : 0.95 })
     : new THREE.LineDashedMaterial({ color: f, depthTest: false, transparent: true, opacity: 0.6, dashSize: 1.2, gapSize: 0.8 }));
+  const strBandMats = STR_FARBEN.map((f, i) => new THREE.MeshBasicMaterial({ color: f, depthTest: false, depthWrite: false,
+    transparent: true, opacity: [0.75, 0.6, 0.6][i], side: THREE.DoubleSide }));
+  const strBreiteZeile = $('.lz-str-breite'), strBreiteRegler = $('.lz-str-breite-regler'), strBreiteWert = $('.lz-str-breite-wert');
+  const strBreite = () => Number(strBreiteRegler.value);
+  if (Number.isFinite(gemerkt.strBreite)) strBreiteRegler.value = String(gemerkt.strBreite);
+  const strBreiteText = () => strBreite() ? `${zahl(strBreite(), strBreite() % 1 ? 1 : 0)} m` : 'Linie';
+  strBreiteWert.textContent = strBreiteText();
+  /** Band der Breite b (m) entlang des Linienzugs, auf dessen Höhe. An jedem Knick
+   *  die Mittelsenkrechte, gekappt, damit spitze Kehren nicht ausfransen. */
+  function band(punkte, b) {
+    const n = punkte.length, pos = new Float32Array(n * 6), idx = [];
+    for (let i = 0; i < n; i++) {
+      const p = punkte[i], a = punkte[Math.max(0, i - 1)], c = punkte[Math.min(n - 1, i + 1)];
+      let dx1 = p.x - a.x, dy1 = p.y - a.y, dx2 = c.x - p.x, dy2 = c.y - p.y;
+      const l1 = Math.hypot(dx1, dy1) || 1, l2 = Math.hypot(dx2, dy2) || 1;
+      dx1 /= l1; dy1 /= l1; dx2 /= l2; dy2 /= l2;
+      if (i === 0) { dx1 = dx2; dy1 = dy2; }
+      if (i === n - 1) { dx2 = dx1; dy2 = dy1; }
+      let nx = -(dy1 + dy2), ny = dx1 + dx2;
+      const ln = Math.hypot(nx, ny) || 1;
+      nx /= ln; ny /= ln;
+      // Gehrung: im Knick breiter, damit das Band gleich breit wirkt — höchstens doppelt
+      const cos = Math.max(0.5, nx * -dy1 + ny * dx1), h = b / 2 / cos;
+      pos.set([p.x + nx * h, p.y + ny * h, p.z, p.x - nx * h, p.y - ny * h, p.z], i * 6);
+      if (i) idx.push(2 * i - 2, 2 * i - 1, 2 * i, 2 * i - 1, 2 * i + 1, 2 * i);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    return g;
+  }
+  /** Die Linien bzw. Bänder der Straßen neu in die Gruppe legen (beim Laden und bei neuer Breite). */
+  function strassenZeichnen() {
+    const { gruppe, stuecke } = strassen;
+    for (const o of [...gruppe.children]) { gruppe.remove(o); o.geometry.dispose(); }
+    const b = strBreite();
+    for (const { stufe, st } of stuecke) {
+      let o;
+      if (b) o = new THREE.Mesh(band(st, b), strBandMats[stufe]);
+      else {
+        o = auflLinie(st, strMats[stufe]);
+        if (stufe === 2) o.computeLineDistances();
+      }
+      o.renderOrder = 4;
+      gruppe.add(o);
+    }
+    neu = true;
+  }
+  strBreiteRegler.addEventListener('input', () => {
+    strBreiteWert.textContent = strBreiteText();
+    if (strassen) strassenZeichnen();
+  });
   let strLaedt = false;
   const strText = () => 'an';
+  function strZeigen(an) {
+    auflZeigen(strassen, strKnopf, an, strassen.stuecke.length ? strText() : 'keine');
+    strBreiteZeile.hidden = !an || !strassen.stuecke.length;
+  }
   async function strassenLaden() {
     strLaedt = true;
     strKnopf.classList.add('laedt');
@@ -1300,17 +1445,8 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     if (!laeuft) return;
     strKnopf.classList.remove('laedt');
     if (!liste) { strKnopf.querySelector('small').textContent = 'aus'; hinweis('Das Straßennetz ließ sich nicht laden.'); return; }
-    const gruppe = new THREE.Group(), schilder = [];
-    let anzahl = 0;
-    for (const s of liste.strassen) {
-      for (const st of aufBoden(s.pts)) {
-        const l = auflLinie(st, strMats[s.stufe]);
-        if (s.stufe === 2) l.computeLineDistances();
-        l.renderOrder = 4;
-        gruppe.add(l);
-        anzahl++;
-      }
-    }
+    const gruppe = new THREE.Group(), schilder = [], stuecke = [];
+    for (const s of liste.strassen) for (const st of aufBoden(s.pts)) stuecke.push({ stufe: s.stufe, st });
     const laengste = new Map();
     for (const nm of liste.namen) {
       for (const st of aufBoden(nm.pts)) if (!laengste.has(nm.name) || laengste.get(nm.name).length < st.length) laengste.set(nm.name, st);
@@ -1318,15 +1454,16 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     [...laengste].sort((a, b) => b[1].length - a[1].length).slice(0, STR_NAMEN_MAX)
       .forEach(([name, st]) => schilder.push(schild(st[st.length >> 1], esc(name), 'strasse')));
     auflSzene.add(gruppe);
-    strassen = { gruppe, schilder, anzahl };
-    auflZeigen(strassen, strKnopf, true, anzahl ? strText() : 'keine');
+    strassen = { gruppe, schilder, stuecke };
+    strassenZeichnen();
+    strZeigen(true);
     quellenNeu();
-    if (!anzahl) hinweis(liste.strassen.length ? 'Unter den Straßen liegen hier keine Bodenpunkte.' : 'Im Ausschnitt liegt keine Straße.');
+    if (!stuecke.length) hinweis(liste.strassen.length ? 'Unter den Straßen liegen hier keine Bodenpunkte.' : 'Im Ausschnitt liegt keine Straße.');
   }
   if (strKnopf) strKnopf.addEventListener('click', () => {
     if (strLaedt) return;
     if (!strassen) { strassenLaden(); return; }
-    auflZeigen(strassen, strKnopf, !strassen.gruppe.visible, strText());
+    strZeigen(!strassen.gruppe.visible);
     quellenNeu();
   });
 
@@ -1349,8 +1486,10 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       if (o.art === 'p') {
         const x = o.pts[0][0] - d.mitte[0], y = o.pts[0][1] - d.mitte[1];
         if (Math.abs(x) > halb || Math.abs(y) > halb) continue;
-        const b = bodenHoehe(x, y);
-        const p = new THREE.Vector3(x, y, (b ? b.z : zLo) + ANHEBEN);
+        // Mit eigener Höhe auf dieser (Meter über NHN, wie die Laserpunkte), sonst aufs Gelände
+        const b = Number.isFinite(o.hoehe) ? null : bodenHoehe(x, y);
+        const p = new THREE.Vector3(x, y, Number.isFinite(o.hoehe) ? o.hoehe - d.zMin : (b ? b.z : zLo) + ANHEBEN);
+        if (Number.isFinite(o.hoehe)) kugelWolke.union(new THREE.Sphere(p.clone(), 0.5));
         const k = new THREE.Mesh(kugelGeo, kmlMat(o.farbe, 'p'));
         k.position.copy(p);
         k.renderOrder = 6;
@@ -1369,7 +1508,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     if (!liste.length) return;
     kmlKnopf.hidden = false;
     breitSetzen();
-    auflZeigen(kmlAufl, kmlKnopf, true, `${liste.length.toLocaleString('de-DE')}`);
+    auflZeigen(kmlAufl, kmlKnopf, gemerkt.kml !== false, `${liste.length.toLocaleString('de-DE')}`);
   }
   kmlKnopf.addEventListener('click', () => {
     if (!kmlAufl) return;
@@ -1951,7 +2090,9 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   const desktop = window.matchMedia('(min-width: 1010px)');
   const seite = $('.lz-seite'), fussVor = $('.lz-marken');
   let bereich = 'darstellung', seiteZu = false;
-  const freiLinks = () => !desktop.matches ? 0 : seiteZu ? 64 : 384;
+  // Breite von Spalte und Leiste aus dem Stylesheet (--schiene, --seite), nicht doppelt hier
+  const cssPx = name => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+  const freiLinks = () => !desktop.matches ? 0 : seiteZu ? cssPx('--schiene') : cssPx('--schiene') + cssPx('--seite');
   /* Regen am Handy: eigene Tafel über dem Regen-Knopf (links, über dem Messen).
    * Wie Tafel und Messmenü ist immer nur eins offen. */
   const regenSektion = $('[data-bereich="regen"]'), regenTafel = $('.lz-regen-tafel'), regenKnopf = $('.lz-regen-knopf');
@@ -2479,9 +2620,59 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   zielBauen();
   kmlBauen();
   achsenLaden();
+
+  /* ---------- Einstellungen merken ----------
+   * Beim nächsten Öffnen wieder so wie zuletzt (so gewünscht, 07.11.2026): Färbung,
+   * Regler, Effekte, Klassen, Auflagen samt Dächern, Kamera, Hintergrund, offene
+   * Abschnitte der Tafel. Nicht: Blickrichtung (anderer Ausschnitt), Messungen,
+   * Regen, Export. Gespeichert beim Schließen und wenn die App in den Hintergrund
+   * geht — wird sie dort beendet, kommt schliessen nicht mehr. */
+  function einstStand() {
+    const hier = new Set(d.klassen.map(([k]) => k));
+    const klassenAus = [...wurzel.querySelectorAll('[data-klasse]')].filter(b => !b.classList.contains('is-on')).map(b => Number(b.dataset.klasse));
+    return {
+      faerbung: faerbungWahl, groesse: Number(groesse.value), edl: Number(edlRegler.value),
+      licht: lichtRegler.disabled ? gemerkt.licht : Number(lichtRegler.value),
+      effekte: { ...effekte },
+      // Klassen, die es hier nicht gibt, bleiben, wie sie zuletzt waren
+      klassenAus: [...(gemerkt.klassenAus || []).filter(k => !hier.has(k)), ...klassenAus],
+      geb: geb ? geb.gruppe.visible : gebLaeuft || false, dach: dachBild ? 'luftbild' : 'grau',
+      achsen: achsen ? achsen.gruppe.visible : gemerkt.achsen,
+      strassen: strassen ? strassen.gruppe.visible : strLaedt || false, strBreite: strBreite(),
+      kml: kmlAufl && kmlAufl.anzahl ? kmlAufl.gruppe.visible : gemerkt.kml,
+      kamera: kamera === orthoKamera ? 'ortho' : 'perspektive',
+      grund: wurzel.dataset.grund,
+      offen: [...tafel.querySelectorAll('details')].map(x => x.open)
+    };
+  }
+  function einstSpeichern() {
+    try { localStorage.setItem(EINST_SCHLUESSEL, JSON.stringify(einstStand())); } catch { /* privates Fenster o. Ä. */ }
+  }
+  function einstAnwenden(g) {
+    const klick = sel => { const b = $(sel); if (b && !b.hidden && !b.disabled) b.click(); return b; };
+    // Erst die Färbung: „Normalen“ und „Intensität“ stellen den Schatten selbst, die Regler danach
+    if (g.faerbung && g.faerbung !== faerbung) klick(`[data-faerbung="${g.faerbung}"]`);
+    const regler = (el, w) => { if (Number.isFinite(w) && !el.disabled) el.value = String(w); };
+    regler(groesse, g.groesse); regler(edlRegler, g.edl); regler(lichtRegler, g.licht);
+    reglerZeigen();
+    for (const [art, an] of Object.entries(g.effekte || {})) if (an && !effekte[art]) klick(`[data-effekt="${art}"]`);
+    for (const k of g.klassenAus || []) { const b = $(`[data-klasse="${k}"]`); if (b && b.classList.contains('is-on')) b.click(); }
+    if (g.geb && info.gebaeude) gebKnopf.click();
+    if (g.dach === 'luftbild' && info.gebaeude && info.luftbild) dachSetzen('luftbild');
+    if (g.strassen && strKnopf && info.strassen) strKnopf.click();
+    if (g.kamera === 'ortho') klick('[data-kamera="ortho"]');
+    if (g.grund && g.grund !== wurzel.dataset.grund) klick(`.lz-tafel [data-grund="${g.grund}"]`);
+    if (Array.isArray(g.offen)) tafel.querySelectorAll('details').forEach((x, i) => { if (typeof g.offen[i] === 'boolean') x.open = g.offen[i]; });
+  }
+  einstAnwenden(gemerkt);
+  const imHintergrund = () => { if (document.visibilityState === 'hidden') einstSpeichern(); };
+  document.addEventListener('visibilitychange', imHintergrund);
   bild();
 
   function schliessen() {
+    if (!laeuft) return;
+    einstSpeichern();
+    document.removeEventListener('visibilitychange', imHintergrund);
     laeuft = false;
     beobachter.disconnect();
     desktop.removeEventListener('change', anordnen);
@@ -2496,7 +2687,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     auflSzene.traverse(o => { if (o.geometry && o.geometry !== kugelGeo) o.geometry.dispose(); });
     strMats.forEach(m => m.dispose());
     achsMat.dispose(); zielMat.dispose(); zielLinieMat.dispose(); kmlMats.forEach(m => m.dispose());
-    gebFlaecheMat.dispose(); gebKanteMat.dispose(); linienMat.dispose(); linienHauptMat.dispose();
+    gebFlaecheMat.dispose(); gebKanteMat.dispose(); if (dachTextur) dachTextur.dispose(); linienMat.dispose(); linienHauptMat.dispose();
     linienSzene.traverse(o => { if (o.geometry) o.geometry.dispose(); });
     if (regen) regen.entsorgen();
     geo.dispose(); material.dispose(); edl.dispose(); ziel.dispose(); schirm.geometry.dispose();
@@ -2512,5 +2703,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   const taste = ev => { if (ev.key === 'Escape') schliessen(); };
   document.addEventListener('keydown', taste);
   $('.lz-zu').addEventListener('click', schliessen);
+  // Für die Zurück-Geste in app.js: erst ein Hinweis in der Ansicht, beim zweiten Mal zu
+  schliessen.hinweis = hinweis;
   return schliessen;
 }
