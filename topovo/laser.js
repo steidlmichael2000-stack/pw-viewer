@@ -399,9 +399,9 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
           <span class="slider-val lz-edl-wert"></span>
         </label>
         <div class="lz-klassen lz-effekte">
-          <button type="button" class="seg-btn lz-klasse" data-effekt="verdeckung" data-ik="verdeckung" aria-pressed="false"><span class="lz-name">Verdeckung</span><small>aus</small></button>
-          <button type="button" class="seg-btn lz-klasse" data-effekt="kugeln" data-ik="kugeln" aria-pressed="false"><span class="lz-name">Kugeln</span><small>aus</small></button>
-          <button type="button" class="seg-btn lz-klasse" data-effekt="linien" data-ik="linien" aria-pressed="false"><span class="lz-name">Höhenlinien</span><small>aus</small></button>
+          <button type="button" class="seg-btn lz-klasse" data-effekt="verdeckung" data-ik="verdeckung" aria-pressed="false"><span class="lz-name">Verdeckung</span></button>
+          <button type="button" class="seg-btn lz-klasse" data-effekt="kugeln" data-ik="kugeln" aria-pressed="false"><span class="lz-name">Kugeln</span></button>
+          <button type="button" class="seg-btn lz-klasse" data-effekt="linien" data-ik="linien" aria-pressed="false"><span class="lz-name">Höhenlinien</span><small></small></button>
         </div>
       </details>
       <details class="sheet-sec lz-klassen-titel" open>
@@ -1774,7 +1774,9 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     b.classList.toggle('is-on', an);
     b.setAttribute('aria-pressed', String(an));
     if (art === 'linien') hoehenlinienZeigen(an);
-    b.querySelector('small').textContent = an ? (art === 'linien' ? hoehenlinienText() : 'an') : 'aus';
+    // An oder aus zeigt der Knopf selbst (Ton in Ton); nur die Höhenlinien nennen ihren Abstand
+    const zusatz = b.querySelector('small');
+    if (zusatz) zusatz.textContent = an && art === 'linien' ? hoehenlinienText() : '';
     if (art === 'verdeckung') edl.uniforms.verdeckung.value = an ? 1 : 0;
     if (art === 'kugeln') {
       // Tiefe schreiben nur bei den Kugeln — sonst bleibt die frühe Tiefenprüfung der Grafikkarte an
