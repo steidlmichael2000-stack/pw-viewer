@@ -58,6 +58,9 @@ const PUNKT_VS = `
   uniform int boxModus;
   uniform vec3 boxMitte, boxHalb;
   uniform vec2 boxRot;
+  uniform sampler2D katTex;
+  uniform float katAn, katSeite, katLod, katStark;
+  uniform vec3 katFarbe;
   varying vec3 vFarbe;
   varying float vMvZ, vWeltR;
   void main() {
@@ -67,6 +70,13 @@ const PUNKT_VS = `
     // Schummerung wie beim Relief: Licht von Nordwesten, 45° hoch
     float hell = 0.25 + 0.95 * max(dot(normalize(normale), lichtRichtung), 0.0);
     vFarbe = min(farbe * mix(1.0, hell, licht), vec3(1.0));
+    /* Kataster (17.11.2026 so gewünscht): die Umringe färben die Punkte darunter, wie das Luftbild.
+     * Feinere Mip-Stufe bei dünn stehenden Punkten (katLod), sonst fielen die Linien durch die Lücken. */
+    if (katAn > 0.5) {
+      vec2 kuv = position.xy / katSeite + 0.5;
+      if (all(greaterThanEqual(kuv, vec2(0.0))) && all(lessThanEqual(kuv, vec2(1.0))))
+        vFarbe = mix(vFarbe, katFarbe, min(1.0, textureLod(katTex, kuv, katLod).a * katStark));
+    }
     // Ausgeblendete Klasse: hinter die ferne Ebene, wird nicht gezeichnet
     if (masken[int(klasse) & 31] < 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     // Darstellung „Gelände“: den Boden zeigt die Fläche, seine Punkte fallen weg
@@ -156,7 +166,9 @@ const GEL_FS = `
   uniform int modus;
   uniform vec3 lichtRichtung, grundFarbe, neig0, neig1, neig2;
   uniform float licht, zLo, zHi, seite;
-  uniform sampler2D rampe, bild;
+  uniform sampler2D rampe, bild, katTex;
+  uniform float katAn, katSeite;
+  uniform vec3 katFarbe;
   uniform int boxModus;
   uniform vec3 boxMitte, boxHalb;
   uniform vec2 boxRot;
@@ -181,7 +193,9 @@ const GEL_FS = `
     }
     // Aufgefüllt (kein Bodenpunkt in der Nähe: unter Häusern, dichtem Wald) etwas dunkler
     if (modus == 0 || modus == 3) f *= mix(1.0, 0.72, smoothstep(0.3, 0.7, vArt));
-    gl_FragColor = vec4(min(f * mix(1.0, hell, licht), vec3(1.0)), 1.0);
+    vec3 farbeG = min(f * mix(1.0, hell, licht), vec3(1.0));
+    if (katAn > 0.5) farbeG = mix(farbeG, katFarbe, texture2D(katTex, vXY / katSeite + 0.5).a);
+    gl_FragColor = vec4(farbeG, 1.0);
   }`;
 
 /* Eye-Dome-Lighting nach Boucheny (2009), wie in Potree: je Bildpunkt die
@@ -713,7 +727,9 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     uniforms: { groesse: { value: 0.25 }, skala: { value: 1 }, masken: { value: masken }, licht: { value: 0.5 },
       ortho: { value: 0 }, orthoSkala: { value: 1 }, maxPx: { value: 24 }, bodenAus: { value: 0 },
       boxModus: { value: 0 }, boxMitte: { value: new THREE.Vector3() }, boxHalb: { value: new THREE.Vector3(1, 1, 1) }, boxRot: { value: new THREE.Vector2(1, 0) },
-      lichtRichtung: { value: new THREE.Vector3(-0.5, 0.5, Math.SQRT1_2) } }
+      lichtRichtung: { value: new THREE.Vector3(-0.5, 0.5, Math.SQRT1_2) },
+      katTex: { value: null }, katAn: { value: 0 }, katSeite: { value: info.seite }, katLod: { value: 0 }, katStark: { value: 1 },
+      katFarbe: { value: new THREE.Color(1, 0.84, 0.04) } }
   });
   const wolke = new THREE.Points(geo, material);
   szene.add(wolke);
@@ -872,7 +888,8 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
         licht: material.uniforms.licht, grundFarbe: { value: new THREE.Color(0.82, 0.82, 0.82) },
         neig0: { value: NEIG[0] }, neig1: { value: NEIG[1] }, neig2: { value: NEIG[2] },
         zLo: { value: zLo }, zHi: { value: zHi }, seite: { value: info.seite }, rampe: { value: rampeTex }, bild: { value: null },
-        boxModus: material.uniforms.boxModus, boxMitte: material.uniforms.boxMitte, boxHalb: material.uniforms.boxHalb, boxRot: material.uniforms.boxRot }
+        boxModus: material.uniforms.boxModus, boxMitte: material.uniforms.boxMitte, boxHalb: material.uniforms.boxHalb, boxRot: material.uniforms.boxRot,
+        katTex: material.uniforms.katTex, katAn: material.uniforms.katAn, katSeite: material.uniforms.katSeite, katFarbe: material.uniforms.katFarbe }
     });
     gelaende = new THREE.Mesh(gg, gm);
     gelaende.frustumCulled = false;
@@ -1760,33 +1777,14 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
 
   /* Kataster (12.11.2026 gewünscht): die Parzellarkarte der BVV (info.kataster, WMS-Adresse) als Bild,
    * die schwarzen Umringe in der Parzellenfarbe der Karte (schwarz → gelb, auf dem dunklen Grund sonst
-   * unsichtbar). Gelegt auf eine Fläche, die dem Gelände folgt — aus dem Bodenraster (gelaendeHoehe),
-   * sonst vom Laserboden; wo keine Punkte sind, bleibt sie offen. Erst beim ersten Einschalten geholt. */
+   * unsichtbar). Seit 17.11.2026 färbt es die Punkte und das Gelände selbst (Shader, katTex) wie das
+   * Luftbild — vorher eine eigene Fläche darüber, die über Bäumen und Häusern schwebte. Erst beim ersten
+   * Einschalten geholt. */
   const katKnopf = $('.lz-kataster');
-  function katasterFlaeche() {
-    const schritt = Math.max(2, info.seite / 300), k = Math.round(info.seite / schritt) + 1, st = info.seite / (k - 1);
-    const pos = new Float32Array(k * k * 3), uv = new Float32Array(k * k * 2), da = new Uint8Array(k * k), idx = [];
-    for (let j = 0; j < k; j++) for (let i = 0; i < k; i++) {
-      const x = -halb + i * st, y = -halb + j * st, c = j * k + i;
-      let z = NaN;
-      if (imGebiet(x, y)) {
-        z = G ? gelaendeHoehe(x, y) : NaN;
-        if (!Number.isFinite(z)) { const b = bodenHoehe(x, y); z = b ? b.z : NaN; }
-      }
-      da[c] = Number.isFinite(z) ? 1 : 0;
-      pos.set([x, y, (da[c] ? z : 0) + 0.3], c * 3);
-      uv.set([i / (k - 1), j / (k - 1)], c * 2);
-    }
-    for (let j = 0; j < k - 1; j++) for (let i = 0; i < k - 1; i++) {
-      const a = j * k + i, b = a + 1, c = a + k, e = c + 1;
-      if (da[a] && da[b] && da[e]) idx.push(a, b, e);
-      if (da[a] && da[e] && da[c]) idx.push(a, e, c);
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-    g.setIndex(idx);
-    return g;
+  function katZeigen(an) {
+    auflZeigen(kataster, katKnopf, an, 'an');
+    material.uniforms.katAn.value = an ? 1 : 0;
+    neu = true;
   }
   async function katasterLaden() {
     katLaedt = true;
@@ -1826,14 +1824,15 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       katKnopf.querySelector('.lz-feld').style.background = f;
       const tex = new THREE.CanvasTexture(lw);
       tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
-      const m = new THREE.Mesh(katasterFlaeche(), mat);
-      m.renderOrder = 3;
-      const gruppe = new THREE.Group();
-      gruppe.add(m);
-      auflSzene.add(gruppe);
-      kataster = { gruppe, schilder: [] };
-      auflZeigen(kataster, katKnopf, true, 'an');
+      const u = material.uniforms;
+      u.katTex.value = tex;
+      u.katFarbe.value.set(f);
+      // Mip-Stufe nach dem Punktabstand: ein Bildpunkt der Stufe ≈ ein Punktabstand
+      const proPx = info.seite / px, punktAbst = 1 / Math.sqrt(Math.max(0.01, d.anzahl / (info.seite * info.seite)));
+      u.katLod.value = Math.max(0, Math.log2(punktAbst / proPx));
+      u.katStark.value = Math.pow(2, u.katLod.value * 0.8);
+      kataster = { gruppe: new THREE.Group(), schilder: [], tex };
+      katZeigen(true);
       quellenNeu();
     } catch (err) {
       console.warn(err);
@@ -1847,7 +1846,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   if (katKnopf) katKnopf.addEventListener('click', () => {
     if (katLaedt) return;
     if (!kataster) { katasterLaden(); return; }
-    auflZeigen(kataster, katKnopf, !kataster.gruppe.visible, 'an');
+    katZeigen(!kataster.gruppe.visible);
     quellenNeu();
   });
 
