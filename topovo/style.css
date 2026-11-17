@@ -2,6 +2,11 @@
    Farben laufen über Custom Properties, damit Hell/Dunkel an einer Stelle sitzt. */
 
 :root {
+  /* Ränder für Notch, Statusleiste und Gestenleiste. Im Browser und auf dem iPhone die env()-Werte;
+     die Android-App (android/) zeichnet randlos und setzt beide über app.js (androidRaender), weil
+     der WebView env(safe-area-inset-*) dort nicht verlässlich meldet. */
+  --sa-oben: env(safe-area-inset-top);
+  --sa-unten: env(safe-area-inset-bottom);
   /* Gewählte und gefüllte Knöpfe „Ton in Ton“ (11.11.2026, aus fünf Entwürfen gewählt): Fläche nur
      getönt, feiner Rand und Schrift in der Signalfarbe. Vorher voll gefüllt, dann mit Verlauf — beides
      wirkte im Dunkeln billig. Hängt an --accent und folgt der Farbwahl von selbst. */
@@ -192,10 +197,10 @@ body {
   display: flex;
 }
 .bar-bottom, .bar-ziel { order: 2; }
-#hoehenLeiste[hidden] + #ziel[hidden] + #bottom[hidden] + .quellen { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
+#hoehenLeiste[hidden] + #ziel[hidden] + #bottom[hidden] + .quellen { margin-bottom: calc(6px + var(--sa-unten)); }
 /* Bei offenem Menü treten die Leisten zurück (openSheet) — wie ohne Leiste */
 .menue-offen .bar-bottom, .menue-offen .bar-ziel { display: none; }
-.menue-offen .quellen { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
+.menue-offen .quellen { margin-bottom: calc(6px + var(--sa-unten)); }
 .ui > .quellen { pointer-events: none; }
 .quellen-kasten, .quellen-text { pointer-events: auto; }
 .quellen-kasten {
@@ -235,7 +240,7 @@ body {
 .north {
   position: fixed;
   right: var(--saeule);
-  bottom: calc(var(--grund) + 144px + env(safe-area-inset-bottom));
+  bottom: calc(var(--grund) + 144px + var(--sa-unten));
   z-index: 450;
   width: 42px; height: 42px;
   display: grid; place-items: center; gap: 0;
@@ -256,7 +261,7 @@ body {
   /* Unterkante auf der Grundlinie des Kastens unten links, bei offener Leiste
      8 px darüber (--bh aus updateBH) */
   right: var(--saeule);
-  bottom: calc(var(--grund) + env(safe-area-inset-bottom));
+  bottom: calc(var(--grund) + var(--sa-unten));
   z-index: 450;
   width: 42px; height: 42px;
   display: grid; place-items: center;
@@ -282,7 +287,7 @@ body {
 .mapmess {
   position: fixed;
   right: var(--saeule);
-  bottom: calc(var(--grund) + 48px + env(safe-area-inset-bottom));      /* 42 px Knopf + 6 Luft */
+  bottom: calc(var(--grund) + 48px + var(--sa-unten));      /* 42 px Knopf + 6 Luft */
   z-index: 450;
   width: 42px; height: 42px;
   display: grid; place-items: center;
@@ -299,7 +304,7 @@ body {
 .mess-menue {
   position: fixed;
   right: calc(var(--saeule) + 48px);
-  bottom: calc(var(--grund) + 48px + env(safe-area-inset-bottom));
+  bottom: calc(var(--grund) + 48px + var(--sa-unten));
   z-index: 460;
   width: min(250px, calc(100vw - 2 * var(--gap) - 48px));
   background: var(--glass); border: 1px solid transparent; border-radius: var(--r);
@@ -325,7 +330,7 @@ body {
 .mapziel {
   position: fixed;
   right: var(--saeule);
-  bottom: calc(var(--grund) + 144px + env(safe-area-inset-bottom));
+  bottom: calc(var(--grund) + 144px + var(--sa-unten));
   z-index: 450;
   width: 42px; height: 42px;
   display: grid; place-items: center;
@@ -337,14 +342,14 @@ body {
 }
 .mapziel svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
 .mapziel.is-on { color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--glass)); }
-.mapziel:not([hidden]) ~ .north { bottom: calc(var(--grund) + 192px + env(safe-area-inset-bottom)); }
+.mapziel:not([hidden]) ~ .north { bottom: calc(var(--grund) + 192px + var(--sa-unten)); }
 
 /* Laserpunkte in 3D — eigener Knopf über dem Messen (seit November 2026; Abstecken
    und Nord stehen deshalb eine Stufe höher). Am Desktop in der Symbolspalte. */
 .maplaser {
   position: fixed;
   right: var(--saeule);
-  bottom: calc(var(--grund) + 96px + env(safe-area-inset-bottom));
+  bottom: calc(var(--grund) + 96px + var(--sa-unten));
   z-index: 450;
   width: 42px; height: 42px;
   display: grid; place-items: center;
@@ -370,11 +375,11 @@ body {
   /* Die Zeile bleibt als Abstandhalter im Fluss — ihr margin-top: auto hält die
      Leisten unten —, ihr Inhalt wandert ins Eck */
   .quellen, #hoehenLeiste[hidden] + #ziel[hidden] + #bottom[hidden] + .quellen { height: 0; margin-bottom: 0; }
-  .quellen-kasten { position: fixed; left: var(--gap); bottom: calc(6px + env(safe-area-inset-bottom)); }
+  .quellen-kasten { position: fixed; left: var(--gap); bottom: calc(6px + var(--sa-unten)); }
   /* Der aufgeklappte Quellentext bleibt in seiner Ecke, so breit wie die Seitenleiste */
   .quellen-text {
     position: fixed; left: var(--gap); right: auto;
-    bottom: calc(6px + 22px + 4px + env(safe-area-inset-bottom));
+    bottom: calc(6px + 22px + 4px + var(--sa-unten));
     max-width: var(--seite);
   }
   /* Das Messmenü reicht dann über die Spalte — es gehört über eine offene Leiste */
@@ -402,11 +407,11 @@ body {
   -webkit-backdrop-filter: var(--blur);
 }
 
-.bar-top { margin-top: calc(var(--gap) + env(safe-area-inset-top)); flex: none; }
+.bar-top { margin-top: calc(var(--gap) + var(--sa-oben)); flex: none; }
 .bar-bottom {
   position: relative;
   margin-top: 0;             /* den Abstand nach oben trägt die Quellenzeile darüber */
-  margin-bottom: calc(6px + env(safe-area-inset-bottom));
+  margin-bottom: calc(6px + var(--sa-unten));
   padding: 12px 14px 13px;
   flex: none;
 }
@@ -418,8 +423,8 @@ body {
   padding: 12px 14px 13px;
   flex: none;
 }
-.bar-ziel:has(+ #bottom[hidden]) { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
-#hoehenLeiste:has(+ #ziel[hidden] + #bottom[hidden]) { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
+.bar-ziel:has(+ #bottom[hidden]) { margin-bottom: calc(6px + var(--sa-unten)); }
+#hoehenLeiste:has(+ #ziel[hidden] + #bottom[hidden]) { margin-bottom: calc(6px + var(--sa-unten)); }
 
 /* Höhenfarben: Skala waagerecht, links tief, rechts hoch — die Farben wie HOEHEN_RAMPE */
 .hoehen-skala { margin-top: 10px; }
@@ -1771,7 +1776,7 @@ input[type="range"] { min-width: 0; }
 /* ---------- Toast ---------- */
 
 .toast {
-  position: fixed; left: 50%; top: calc(76px + env(safe-area-inset-top));
+  position: fixed; left: 50%; top: calc(76px + var(--sa-oben));
   transform: translate(-50%, -12px);
   padding: 10px 17px; border-radius: var(--r-knopf);
   background: var(--text); color: var(--bg);
@@ -2095,7 +2100,7 @@ body { font-variant-numeric: tabular-nums; }
 @media (max-width: 1009.98px) {
   /* Am Handy statt der Suchzeile oben */
   .ui:has(> #routeKopf:not([hidden])) > :is(.bar-top, #suggest) { display: none; }
-  .bar-route { order: -1; margin-top: calc(var(--gap) + env(safe-area-inset-top)); }
+  .bar-route { order: -1; margin-top: calc(var(--gap) + var(--sa-oben)); }
   .bar-route:not([hidden]) { animation: von-oben .3s var(--auf); }
 }
 @media (min-width: 1010px) {
@@ -2183,17 +2188,17 @@ body { font-variant-numeric: tabular-nums; }
 .lz-knopf svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .lz-knopf.is-on { color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--glass)); }
 .lz-messen.is-on { color: var(--warn); background: color-mix(in srgb, var(--warn) 18%, var(--glass)); }
-.lz-einst { left: var(--gap); top: calc(var(--gap) + env(safe-area-inset-top)); }
-.lz-zu { right: var(--gap); top: calc(var(--gap) + env(safe-area-inset-top)); }
-.lz-messen { left: var(--gap); bottom: calc(var(--gap) + env(safe-area-inset-bottom)); }
-.lz-heim { right: var(--gap); bottom: calc(var(--gap) + env(safe-area-inset-bottom)); }
+.lz-einst { left: var(--gap); top: calc(var(--gap) + var(--sa-oben)); }
+.lz-zu { right: var(--gap); top: calc(var(--gap) + var(--sa-oben)); }
+.lz-messen { left: var(--gap); bottom: calc(var(--gap) + var(--sa-unten)); }
+.lz-heim { right: var(--gap); bottom: calc(var(--gap) + var(--sa-unten)); }
 /* Standort über der Startansicht; an wie der Standortknopf der Karte (getöntes Glas) */
-.lz-ort { right: var(--gap); bottom: calc(var(--gap) + 52px + env(safe-area-inset-bottom)); }
+.lz-ort { right: var(--gap); bottom: calc(var(--gap) + 52px + var(--sa-unten)); }
 .lz-ort svg .voll { fill: currentColor; stroke: none; }
 /* Limitbox (12.11.2026): eigener Knopf über dem Standort, der Dialog links daneben */
-.lz-box-knopf { right: var(--gap); bottom: calc(var(--gap) + 104px + env(safe-area-inset-bottom)); }
+.lz-box-knopf { right: var(--gap); bottom: calc(var(--gap) + 104px + var(--sa-unten)); }
 .lz-box-dialog {
-  position: absolute; z-index: 2; right: calc(var(--gap) + 52px); bottom: calc(var(--gap) + 104px + env(safe-area-inset-bottom));
+  position: absolute; z-index: 2; right: calc(var(--gap) + 52px); bottom: calc(var(--gap) + 104px + var(--sa-unten));
   width: min(300px, calc(100vw - 2 * var(--gap) - 52px)); padding: 4px 14px 14px;
   border: 1px solid transparent; border-radius: var(--r);
   background: var(--glass); box-shadow: var(--shadow);
@@ -2210,10 +2215,10 @@ body { font-variant-numeric: tabular-nums; }
 .regen-modus .lz-box-knopf, .regen-modus .lz-box-dialog, .regen-tafel-offen .lz-box-knopf { display: none; }
 /* Regen am Handy: Knopf über dem Messen (wie der Standort über der Startansicht),
  * die Tafel darüber; leuchtet, solange es regnet */
-.lz-regen-knopf { left: var(--gap); bottom: calc(var(--gap) + 52px + env(safe-area-inset-bottom)); }
+.lz-regen-knopf { left: var(--gap); bottom: calc(var(--gap) + 52px + var(--sa-unten)); }
 .lz-regen-tafel {
-  position: absolute; z-index: 2; left: var(--gap); bottom: calc(var(--gap) + 104px + env(safe-area-inset-bottom));
-  width: min(340px, calc(100vw - 2 * var(--gap))); max-height: calc(100% - 180px - env(safe-area-inset-top)); overflow: auto;
+  position: absolute; z-index: 2; left: var(--gap); bottom: calc(var(--gap) + 104px + var(--sa-unten));
+  width: min(340px, calc(100vw - 2 * var(--gap))); max-height: calc(100% - 180px - var(--sa-oben)); overflow: auto;
   padding: 2px 14px 14px; border: 1px solid transparent; border-radius: var(--r);
   background: var(--glass); box-shadow: var(--shadow);
   backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
@@ -2223,7 +2228,7 @@ body { font-variant-numeric: tabular-nums; }
  * so gewünscht (Bildschirmfoto 06.11.2026): erreichbar, auch wenn die Tafel zu ist */
 .lz-regen-leiste {
   position: absolute; z-index: 2; left: calc(var(--gap) + 50px); right: calc(var(--gap) + 50px);
-  bottom: calc(var(--gap) + env(safe-area-inset-bottom)); max-width: 280px; margin: 0 auto;
+  bottom: calc(var(--gap) + var(--sa-unten)); max-width: 280px; margin: 0 auto;
   padding: 0; border-radius: var(--r-knopf);
 }
 .lz-regen-leiste:not([hidden]) { animation: von-unten .24s var(--auf); }
@@ -2254,11 +2259,11 @@ body { font-variant-numeric: tabular-nums; }
 .regen-modus .lz-regen-leiste { left: var(--gap); right: var(--gap); max-width: 420px; }
 /* Die breite Leiste deckte Regen-Knopf und Standort: der Regen-Knopf rückt nach oben links (wo die
  * Einstellungen waren), der Standort unter das ×, die Tafel klappt von oben auf bis über die Knöpfe */
-.regen-modus .lz-regen-knopf { top: calc(var(--gap) + env(safe-area-inset-top)); bottom: auto; }
-.regen-modus .lz-ort { top: calc(var(--gap) + 52px + env(safe-area-inset-top)); bottom: auto; }
+.regen-modus .lz-regen-knopf { top: calc(var(--gap) + var(--sa-oben)); bottom: auto; }
+.regen-modus .lz-ort { top: calc(var(--gap) + 52px + var(--sa-oben)); bottom: auto; }
 .regen-modus .lz-regen-tafel {
-  top: calc(var(--gap) + 52px + env(safe-area-inset-top)); bottom: auto;
-  max-height: calc(100% - 2 * var(--gap) - 104px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  top: calc(var(--gap) + 52px + var(--sa-oben)); bottom: auto;
+  max-height: calc(100% - 2 * var(--gap) - 104px - var(--sa-oben) - var(--sa-unten));
 }
 .regen-modus .lz-regen-tafel:not([hidden]) { animation: von-oben .24s var(--auf); }
 .regen-tafel-offen .lz-regen-leiste .lz-regen-werte { display: none; }
@@ -2266,7 +2271,7 @@ body { font-variant-numeric: tabular-nums; }
 .regen-tafel-offen .lz-ort { display: none; }
 /* Mit den Kennzahlen ist die Leiste bis 200 px hoch: Hinweise („Bewuchs ausgeblendet …“) lagen darüber.
  * Solange sie steht, kommen sie oben unter die Quellenangabe. */
-.lz-regen-leiste:not([hidden]) ~ .lz-tipp { top: calc(var(--gap) + 52px + env(safe-area-inset-top)); bottom: auto; }
+.lz-regen-leiste:not([hidden]) ~ .lz-tipp { top: calc(var(--gap) + 52px + var(--sa-oben)); bottom: auto; }
 /* Senkrechtes Wischen über einem Regler rollt die Tafel, statt den Wert zu ändern — am Handy hatte
  * sich die Überhöhung beim Rollen der Regen-Tafel „von selbst“ verstellt (06.11.2026) */
 .lz-regen-tafel input[type="range"], .lz-tafel input[type="range"] { touch-action: pan-y; }
@@ -2274,7 +2279,7 @@ body { font-variant-numeric: tabular-nums; }
 /* Wie der Standortknopf der Karte (.maploc): Fadenkreuz, beim Suchen gestrichelter Ring */
 .lz-ort.busy svg .ring { stroke-dasharray: 6 5; }
 .lz-tafel {
-  position: absolute; z-index: 2; left: var(--gap); top: calc(var(--gap) + 50px + env(safe-area-inset-top));
+  position: absolute; z-index: 2; left: var(--gap); top: calc(var(--gap) + 50px + var(--sa-oben));
   width: min(320px, calc(100vw - 2 * var(--gap))); max-height: calc(100% - 130px); overflow: auto;
   padding: 2px 14px 14px; border: 1px solid transparent; border-radius: var(--r);
   background: var(--glass); box-shadow: var(--shadow);
@@ -2345,7 +2350,7 @@ body { font-variant-numeric: tabular-nums; }
 /* Fünf Färbungen: Luftbild allein in der letzten Zeile über die ganze Breite */
 .lz-feld { flex: none; width: 10px; height: 10px; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255, 255, 255, .5); }
 .lz-skala {
-  position: absolute; z-index: 2; left: 50%; top: calc(var(--gap) + 52px + env(safe-area-inset-top)); transform: translateX(-50%);
+  position: absolute; z-index: 2; left: 50%; top: calc(var(--gap) + 52px + var(--sa-oben)); transform: translateX(-50%);
   width: min(320px, calc(100vw - 130px)); padding: 9px 12px 8px;
   border: 1px solid transparent; border-radius: var(--r-knopf);
   background: var(--glass); box-shadow: var(--shadow);
@@ -2353,7 +2358,7 @@ body { font-variant-numeric: tabular-nums; }
 }
 /* Das Messmenü wie in der App, nur links unten über dem Knopf */
 .lz-mess-menue.mess-menue {
-  position: absolute; z-index: 3; right: auto; left: var(--gap); bottom: calc(var(--gap) + 50px + env(safe-area-inset-bottom));
+  position: absolute; z-index: 3; right: auto; left: var(--gap); bottom: calc(var(--gap) + 50px + var(--sa-unten));
   transform-origin: left bottom;
 }
 .lz-mess-menue button.is-on { background: color-mix(in srgb, var(--warn) 14%, transparent); }
@@ -2361,7 +2366,7 @@ body { font-variant-numeric: tabular-nums; }
 /* Die laufende Messung: Leiste wie die Werkzeuge der App, unten zwischen den Knöpfen */
 .lz-leiste {
   position: absolute; z-index: 2; left: calc(var(--gap) + 50px); right: calc(var(--gap) + 50px);
-  bottom: calc(var(--gap) + env(safe-area-inset-bottom)); max-width: 460px; margin: 0 auto;
+  bottom: calc(var(--gap) + var(--sa-unten)); max-width: 460px; margin: 0 auto;
   padding: 12px 14px 13px; border: 1px solid transparent; border-radius: var(--r);
   background: var(--glass); box-shadow: var(--shadow);
   backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
@@ -2418,7 +2423,7 @@ body { font-variant-numeric: tabular-nums; }
 .lz-fuss {
   /* Die Quellenangabe (CC BY) oben mittig zwischen den Knöpfen — unten stehen
      Messleiste und Hinweis (so gewünscht, 04.11.2026) */
-  position: absolute; z-index: 1; left: 64px; right: 64px; top: calc(var(--gap) + 13px + env(safe-area-inset-top));
+  position: absolute; z-index: 1; left: 64px; right: 64px; top: calc(var(--gap) + 13px + var(--sa-oben));
   margin: 0; text-align: center; font-size: .62rem; line-height: 1.4; color: var(--muted); pointer-events: none;
 }
 /* Die Lizenzlinks darin bleiben antippbar, die Fläche drumherum nicht */
@@ -2436,7 +2441,7 @@ body { font-variant-numeric: tabular-nums; }
 .lz-regen-kostra a { color: inherit; }
 /* Bedienung beim Öffnen, verblasst nach einigen Sekunden */
 .lz-tipp {
-  position: absolute; z-index: 1; left: 50%; bottom: calc(var(--gap) + 4px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  position: absolute; z-index: 1; left: 50%; bottom: calc(var(--gap) + 4px + var(--sa-unten)); transform: translateX(-50%);
   width: max-content; max-width: calc(100% - 130px); margin: 0; padding: 6px 12px;
   border-radius: var(--r-knopf); background: var(--glass); box-shadow: var(--shadow);
   backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);

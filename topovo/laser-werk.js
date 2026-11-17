@@ -190,6 +190,264 @@ async function teilEntpacken({ daten }) {
   } finally { LP._free(zeiger); }
 }
 
+/* ===================== In Stücken auf allen Kernen entpacken (12.11.2026, nur APK) =====================
+ *
+ * Eine LAZ der BVV ist in Stücke (Chunks) zu je 50 000 Punkten geteilt; jedes lässt sich für sich
+ * entpacken. Wo die Stücke anfangen, steht in der Chunk-Tabelle am Ende der Datei — arithmetisch
+ * kodiert wie in LASzip (IntegerCompressor, 32 Bit, 2 Kontexte); laz-perf liest sie, gibt sie aber
+ * nicht heraus, deshalb hier nachgebaut. Geprüft an 613/614_5478: Tabellenende = Tabellenanfang,
+ * alle Punkte bytegleich zu LASZip.getPoint.
+ *
+ * Der Auftrag trägt stuecke = Zahl der Hilfs-Worker (app.js, nur in der Android-App; im Browser 0,
+ * dort bleibt alles wie vorher). Je Gruppe von STUECK_GRUPPE Stücken kopiert der Haupt-Worker die
+ * Bytes heraus und gibt sie an einen freien Hilfs-Worker (diese Datei, Auftrag 'stuecke'); der
+ * entpackt mit laz-perfs ChunkDecoder und schickt nur die Punkte im Rechteck zurück (X, Y, Z als
+ * ganze Zahlen wie im LAS, Klasse, Intensität). Der Haupt-Worker gibt sie in Dateireihenfolge an
+ * nimm — Ausdünnung, Umriss und Bodenraster sind damit genau wie im Durchgang Punkt für Punkt.
+ * Scheitert ein Hilfs-Worker, entpackt der Haupt-Worker diese Gruppe selbst. */
+const STUECK_GRUPPE = 4;
+
+/** Chunk-Tabelle der LAZ in b (Uint8Array, ganze Datei): Anfang (Byte in b) und Punkte je Stück, oder null. */
+function chunkTabelle(b) {               // b: Uint8Array der ganzen Datei
+  const d = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const daten = d.getUint32(96, true);
+  // LASzip-VLR suchen: Chunkgröße
+  let p = d.getUint16(94, true), chunkGroesse = 0;
+  const nv = d.getUint32(100, true);
+  for (let i = 0; i < nv; i++) {
+    let uid = ''; for (let j = 2; j < 18 && b[p + j]; j++) uid += String.fromCharCode(b[p + j]);
+    const id = d.getUint16(p + 18, true), len = d.getUint16(p + 20, true);
+    if (uid === 'laszip encoded' && id === 22204) chunkGroesse = d.getUint32(p + 54 + 12, true);
+    p += 54 + len;
+  }
+  if (!chunkGroesse) return null;
+  let tab = Number(d.getBigInt64(daten, true));
+  if (tab === -1) tab = Number(d.getBigInt64(b.length - 8, true));
+  if (!(tab > daten) || tab + 8 > b.length) return null;
+  if (d.getUint32(tab, true) !== 0) return null;
+  const anzahl = d.getUint32(tab + 4, true);
+  const variabel = chunkGroesse === 0xffffffff;
+  // Arithmetischer Decoder (LASzip arithmeticdecoder.cpp)
+  let pos = tab + 8, value = 0, length = 0xffffffff;
+  const byte = () => (pos < b.length ? b[pos++] : 0);
+  value = ((byte() << 24) >>> 0) + (byte() << 16) + (byte() << 8) + byte();
+  const renorm = () => { do { value = value * 256 + byte(); length *= 256; } while (length < 0x1000000); };
+  const symbolModell = symbole => {
+    const m = { symbole, dist: new Uint32Array(symbole), zahl: new Uint32Array(symbole), tab: null, tabShift: 0, tabGroesse: 0, gesamt: 0, zyklus: symbole, bisUpdate: 0, letztes: symbole - 1 };
+    if (symbole > 16) { let tb = 3; while (symbole > (1 << (tb + 2))) tb++; m.tabGroesse = 1 << tb; m.tabShift = 15 - tb; m.tab = new Uint32Array(m.tabGroesse + 2); }
+    m.zahl.fill(1);
+    modellUpdate(m);
+    m.bisUpdate = m.zyklus = (symbole + 6) >>> 1;
+    return m;
+  };
+  function modellUpdate(m) {
+    if ((m.gesamt += m.zyklus) > 65536) { m.gesamt = 0; for (let n = 0; n < m.symbole; n++) m.gesamt += (m.zahl[n] = (m.zahl[n] + 1) >>> 1); }
+    let summe = 0, s = 0;
+    const skala = Math.floor(0x80000000 / m.gesamt);
+    if (!m.tab) for (let k = 0; k < m.symbole; k++) { m.dist[k] = Math.floor(skala * summe / 65536); summe += m.zahl[k]; }
+    else {
+      for (let k = 0; k < m.symbole; k++) {
+        m.dist[k] = Math.floor(skala * summe / 65536); summe += m.zahl[k];
+        const w = m.dist[k] >>> m.tabShift;
+        while (s < w) m.tab[++s] = k - 1;
+      }
+      m.tab[0] = 0;
+      while (s <= m.tabGroesse) m.tab[++s] = m.symbole - 1;
+    }
+    m.zyklus = (5 * m.zyklus) >>> 2;
+    const maxZ = (m.symbole + 6) << 3;
+    if (m.zyklus > maxZ) m.zyklus = maxZ;
+    m.bisUpdate = m.zyklus;
+  }
+  const symbol = m => {
+    let sym, n, x, y = length;
+    if (m.tab) {
+      length = Math.floor(length / 32768);
+      const dv = Math.floor(value / length), t = dv >>> m.tabShift;
+      sym = m.tab[t]; n = m.tab[t + 1] + 1;
+      while (n > sym + 1) { const k = (sym + n) >>> 1; if (m.dist[k] > dv) n = k; else sym = k; }
+      x = m.dist[sym] * length;
+      if (sym !== m.letztes) y = m.dist[sym + 1] * length;
+    } else {
+      x = sym = 0; length = Math.floor(length / 32768);
+      n = m.symbole; let k = n >>> 1;
+      do { const z = length * m.dist[k]; if (z > value) { n = k; y = z; } else { sym = k; x = z; } } while ((k = (sym + n) >>> 1) !== sym);
+    }
+    value -= x; length = y - x;
+    if (length < 0x1000000) renorm();
+    m.zahl[sym]++;
+    if (--m.bisUpdate === 0) modellUpdate(m);
+    return sym;
+  };
+  const bitModell = () => ({ n0: 1, n: 2, p0: 4096, zyklus: 4, bisUpdate: 4 });
+  const bit = m => {
+    const x = m.p0 * (length >>> 13);
+    let sym;
+    if (value < x) { sym = 0; length = x; m.n0++; } else { sym = 1; value -= x; length -= x; }
+    if (length < 0x1000000) renorm();
+    if (--m.bisUpdate === 0) {
+      if ((m.n += m.zyklus) > 8192) { m.n = (m.n + 1) >>> 1; m.n0 = (m.n0 + 1) >>> 1; if (m.n0 === m.n) m.n++; }
+      m.p0 = Math.floor(m.n0 * Math.floor(0x80000000 / m.n) / 262144);
+      m.zyklus = Math.min(64, (5 * m.zyklus) >>> 2); m.bisUpdate = m.zyklus;
+    }
+    return sym;
+  };
+  const kurz = () => { length = Math.floor(length / 65536); const s = Math.floor(value / length); value -= length * s; if (length < 0x1000000) renorm(); return s; };
+  const bits = k => {
+    if (k > 19) { const lo = kurz(); return (bits(k - 16) * 65536 + lo); }
+    length = Math.floor(length / 2 ** k); const s = Math.floor(value / length); value -= length * s;
+    if (length < 0x1000000) renorm();
+    return s;
+  };
+  // IntegerCompressor(32 Bit, 2 Kontexte, bits_high 8)
+  const mBits = [symbolModell(33), symbolModell(33)];
+  const mKorr = [bitModell()];
+  for (let i = 1; i <= 32; i++) mKorr[i] = symbolModell(i <= 8 ? 1 << i : 256);
+  const entpacke = (pred, ctx) => {
+    const k = symbol(mBits[ctx]);
+    let c;
+    if (k) {
+      if (k < 32) {
+        if (k <= 8) c = symbol(mKorr[k]);
+        else { const k1 = k - 8; c = symbol(mKorr[k]) * 2 ** k1 + bits(k1); }
+        if (c >= 2 ** (k - 1)) c += 1; else c -= 2 ** k - 1;
+      } else c = -0x80000000;
+    } else c = bit(mKorr[0]);
+    return (pred + c) | 0;
+  };
+  const punkte = new Array(anzahl), groesse = new Array(anzahl);
+  for (let i = 0; i < anzahl; i++) {
+    punkte[i] = variabel ? entpacke(i ? punkte[i - 1] : 0, 0) : chunkGroesse;
+    groesse[i] = entpacke(i ? groesse[i - 1] : 0, 1);
+  }
+  const start = new Float64Array(anzahl);
+  let s = daten + 8, gesamt = 0;
+  for (let i = 0; i < anzahl; i++) { start[i] = s; s += groesse[i] >>> 0; gesamt += punkte[i]; }
+  return { chunkGroesse, anzahl, start, groesse: groesse.map(g => g >>> 0), punkte, ende: s, tab, gesamt };
+}
+
+/** Die Stücke als Gruppen für die Hilfs-Worker: [{ von, bis, starts (relativ zu von), punkte }]. */
+function stueckGruppen(T, anzahlPunkte) {
+  const gruppen = [];
+  for (let c0 = 0; c0 < T.anzahl; c0 += STUECK_GRUPPE) {
+    const c1 = Math.min(T.anzahl, c0 + STUECK_GRUPPE);
+    const von = T.start[c0], bis = c1 < T.anzahl ? T.start[c1] : T.ende;
+    const starts = [], punkte = [];
+    for (let c = c0; c < c1; c++) {
+      starts.push(T.start[c] - von);
+      // Feste Chunkgröße: das letzte Stück hat den Rest
+      punkte.push(T.chunkGroesse === 0xffffffff ? T.punkte[c] : Math.min(T.chunkGroesse, anzahlPunkte - c * T.chunkGroesse));
+    }
+    gruppen.push({ von, bis, starts, punkte });
+  }
+  return gruppen;
+}
+
+/** Eine Gruppe entpacken (im Hilfs-Worker, oder im Haupt-Worker als Rückfall): nur Punkte im Rechteck. */
+function gruppeEntpacken(LP, zeiger, { starts, punkte }, format, laenge, X0, X1, Y0, Y1) {
+  const summe = punkte.reduce((a, b) => a + b, 0);
+  const x = new Int32Array(summe), y = new Int32Array(summe), z = new Int32Array(summe);
+  const kl = new Uint8Array(summe), st = new Uint16Array(summe);
+  const p = LP._malloc(64);
+  let n = 0;
+  try {
+    let H8 = LP.HEAPU8, H32 = new Int32Array(H8.buffer), H16 = new Uint16Array(H8.buffer);
+    const i32 = p >> 2, i16 = (p + 12) >> 1, kByte = format >= 6 ? p + 16 : p + 15, kMaske = format >= 6 ? 255 : 31;
+    for (let s = 0; s < starts.length; s++) {
+      const D = new LP.ChunkDecoder();
+      try {
+        D.open(format, laenge, zeiger + starts[s]);
+        for (let i = 0; i < punkte[s]; i++) {
+          D.getPoint(p);
+          // Der Decoder kann beim Öffnen oder ersten Punkt Speicher holen: dann sind die Sichten abgelöst (Länge 0)
+          if (H8.length === 0) { H8 = LP.HEAPU8; H32 = new Int32Array(H8.buffer); H16 = new Uint16Array(H8.buffer); }
+          const X = H32[i32], Y = H32[i32 + 1];
+          if (X < X0 || X > X1 || Y < Y0 || Y > Y1) continue;
+          x[n] = X; y[n] = Y; z[n] = H32[i32 + 2];
+          kl[n] = H8[kByte] & kMaske; st[n] = H16[i16];
+          n++;
+        }
+      } finally { D.delete(); }
+    }
+  } finally { LP._free(p); }
+  return { n, x: x.slice(0, n), y: y.slice(0, n), z: z.slice(0, n), kl: kl.slice(0, n), st: st.slice(0, n) };
+}
+
+/* Im Hilfs-Worker: Aufträge der Reihe nach (laz-perf erst beim ersten). */
+let stueckKette = Promise.resolve();
+function stueckAuftrag(a) {
+  stueckKette = stueckKette.then(async () => {
+    try {
+      if (!lazPerf) lazPerf = await Copc.Las.PointData.createLazPerf({ locateFile: f => 'vendor/copc/' + f });
+      const LP = lazPerf, zeiger = LP._malloc(a.daten.length);
+      if (!zeiger) throw new Error('Kein Speicher');
+      try {
+        LP.HEAPU8.set(a.daten, zeiger);
+        const e = gruppeEntpacken(LP, zeiger, a, a.format, a.laenge, a.X0, a.X1, a.Y0, a.Y1);
+        self.postMessage({ art: 'stueck', id: a.id, ...e }, [e.x.buffer, e.y.buffer, e.z.buffer, e.kl.buffer, e.st.buffer]);
+      } finally { LP._free(zeiger); }
+    } catch (err) {
+      self.postMessage({ art: 'stueck', id: a.id, fehler: String(err && err.message || err) });
+    }
+  });
+}
+
+/* Im Haupt-Worker: anzahl Hilfs-Worker für den ganzen Auftrag. auftrag(gruppe-Daten) gibt ein
+ * Versprechen auf das Ergebnis oder null (Worker gescheitert → selbst entpacken). */
+function stueckPool(anzahl) {
+  const alle = [], frei = [], warten = [], offen = new Map();   // offen: id → { w, fertig }
+  let id = 0, tot = false;
+  const naechster = () => {
+    while (frei.length && warten.length) {
+      const w = frei.pop(), { a, fertig } = warten.shift();
+      offen.set(a.id, { w, fertig });
+      w.postMessage(a, [a.daten.buffer]);
+    }
+  };
+  let lebend = 0;
+  const ausfall = w => {
+    for (const [k, o] of offen) if (o.w === w) { offen.delete(k); o.fertig(null); }
+    const i = frei.indexOf(w);
+    if (i >= 0) frei.splice(i, 1);
+    try { w.terminate(); } catch (err) { /* schon weg */ }
+    // Keiner mehr da: was wartet, entpackt der Haupt-Worker selbst
+    if (--lebend <= 0) for (const r of warten.splice(0)) r.fertig(null);
+  };
+  for (let i = 0; i < anzahl; i++) {
+    let w;
+    try { w = new Worker('laser-werk.js'); } catch (err) { console.warn(err); break; }
+    w.onmessage = ev => {
+      const m = ev.data, o = offen.get(m.id);
+      if (!o) return;
+      offen.delete(m.id);
+      if (m.fehler) console.warn('Stück im Hilfs-Worker:', m.fehler);
+      o.fertig(m.fehler ? null : m);
+      frei.push(w);
+      naechster();
+    };
+    w.onerror = ev => { if (ev.preventDefault) ev.preventDefault(); console.warn('Hilfs-Worker:', ev.message); ausfall(w); };
+    alle.push(w);
+    frei.push(w);
+    lebend++;
+  }
+  const zahl = frei.length;
+  return {
+    zahl,
+    auftrag(a) {
+      if (tot || lebend <= 0) return Promise.resolve(null);
+      a.id = ++id;
+      return new Promise(fertig => { warten.push({ a, fertig }); naechster(); });
+    },
+    ende() {
+      tot = true;
+      for (const r of warten.splice(0)) r.fertig(null);
+      for (const [, o] of offen) o.fertig(null);
+      offen.clear();
+      for (const w of alle) w.terminate();      // auch beschäftigte: ihre Antwort braucht keiner mehr
+    }
+  };
+}
+
 /* Meldungen eines Exports tragen export: true — app.js reicht sie an die
  * Ansicht weiter statt an das Laden auf der Karte. */
 let exportLaeuft = false;
@@ -653,7 +911,7 @@ const inMaske = (M, e, n) => {
  * Hilfs-Worker und ohne entpackten Vorrat. Im Speicher sind so höchstens zwei zugleich. */
 const STROM_AB = 5;
 
-async function ausschneiden({ kacheln, bereich, umriss, max, nurBoden, vorratMax, entpacktMax = 0, parallel = 1, gitterZellen = 0, zGrenze = null }) {
+async function ausschneiden({ kacheln, bereich, umriss, max, nurBoden, vorratMax, entpacktMax = 0, parallel = 1, gitterZellen = 0, zGrenze = null, stuecke = 0, nativ = false }) {
   const strom = kacheln.length >= STROM_AB;
   if (strom) { entpacktMax = 0; zGrenze = null; }
   if (!lazPerf) lazPerf = await Copc.Las.PointData.createLazPerf({ locateFile: f => 'vendor/copc/' + f });
@@ -668,6 +926,7 @@ async function ausschneiden({ kacheln, bereich, umriss, max, nurBoden, vorratMax
   // Entpackt auf dem Gerät (<kachel>.pts): weder LAZ laden noch entpacken
   const vonDatei = new Map();
   let pool = null;                // Hilfs-Worker zum Entpacken (entpackPool), im finally beendet
+  let stueckP = null;             // Hilfs-Worker für Stücke (stueckPool, nur APK), erst beim ersten LAZ, im finally beendet
   try {
   for (const k of kacheln) {
     if (!k.geraet || entpackt.has(k.kachel)) continue;
@@ -798,6 +1057,14 @@ async function ausschneiden({ kacheln, bereich, umriss, max, nurBoden, vorratMax
       return;
     }
     const { zeiger, groesse, kopf: k } = q;
+    // Android-App ab 1.4, Schalter „Nativ“: libtopovo.so entpackt (nativSchneiden); ohne Kopie oder bei Fehlern weiter wie unten
+    if (nativ && await nativSchneiden(q, t, von)) return;
+    if (stuecke > 0) {
+      // In der Android-App: in Stücken auf allen Kernen (siehe stueckPool); ohne brauchbare Chunk-Tabelle wie bisher
+      let T = null;
+      try { T = chunkTabelle(LP.HEAPU8.subarray(zeiger, zeiger + groesse)); } catch (err) { console.warn('Chunk-Tabelle:', err); }
+      if (T && T.ende === T.tab && T.gesamt >= k.anzahl) { await stueckeSchneiden(q, T, t, von); return; }
+    }
     const laszip = new LP.LASZip(), punkt = LP._malloc(64);
     try {
       laszip.open(zeiger, groesse);
@@ -826,6 +1093,82 @@ async function ausschneiden({ kacheln, bereich, umriss, max, nurBoden, vorratMax
       laszip.delete();
       LP._free(punkt);
     }
+  }
+
+  /** Wie oben der Durchgang mit LASZip, nur in Stücken über die Hilfs-Worker; nimm sieht dieselben Punkte in derselben Reihenfolge. */
+  async function stueckeSchneiden({ zeiger, kopf: k }, T, t, von) {
+    if (!stueckP) stueckP = stueckPool(stuecke);
+    const anzahl = k.anzahl;
+    const [sx, sy, sz] = k.skala, [ox, oy, oz] = k.versatz;
+    // Ganzzahlig wie im Durchgang: X < (e0 − ox) / sx heißt X < aufgerundet
+    const X0 = Math.ceil((e0 - ox) / sx), X1 = Math.floor((e1 - ox) / sx), Y0 = Math.ceil((n0 - oy) / sy), Y1 = Math.floor((n1 - oy) / sy);
+    const gruppen = stueckGruppen(T, anzahl);
+    const imFlug = Math.max(2, stueckP.zahl * 2);     // so viele Gruppen sind unterwegs — begrenzt die Kopien
+    const ergebnisse = new Array(gruppen.length);
+    let gesendet = 0, gelesen = 0;
+    for (let i = 0; i < gruppen.length; i++) {
+      while (gesendet < gruppen.length && gesendet < i + imFlug) {
+        const g = gruppen[gesendet];
+        // Jedes Mal neu: der Download nebenher kann den Wasm-Speicher wachsen lassen
+        const daten = LP.HEAPU8.slice(zeiger + g.von, zeiger + g.bis);
+        ergebnisse[gesendet++] = stueckP.auftrag({ art: 'stuecke', daten, starts: g.starts, punkte: g.punkte,
+          format: k.format, laenge: k.laenge, X0, X1, Y0, Y1 });
+      }
+      lesenMelden({ art: 'lesen', nr: t, von, gelesen, gesamt: anzahl });
+      let e = await ergebnisse[i];
+      ergebnisse[i] = null;
+      pruefen();
+      // Hilfs-Worker gescheitert: diese Gruppe hier
+      if (!e) e = gruppeEntpacken(LP, zeiger + gruppen[i].von, gruppen[i], k.format, k.laenge, X0, X1, Y0, Y1);
+      const { x, y, z, kl, st } = e;
+      for (let j = 0; j < e.n; j++) nimm(x[j] * sx + ox, y[j] * sy + oy, z[j] * sz + oz, kl[j], st[j]);
+      for (const p of gruppen[i].punkte) gelesen += p;
+    }
+  }
+
+  /** Stufe 2: die App entpackt nativ (android/nativ/laser_nativ.cpp) und liefert die Punkte im Rechteck
+   *  in Dateireihenfolge, je 15 Byte — dieselben wie stueckeSchneiden. false: nichts übernommen (keine
+   *  Kopie, alte App, Fehler), dann entpackt die Seite selbst. Scheitert es mittendrin, gibt es einen Fehler. */
+  async function nativSchneiden({ kachel, kopf: k }, t, von) {
+    const [sx, sy, sz] = k.skala, [ox, oy, oz] = k.versatz;
+    const X0 = Math.ceil((e0 - ox) / sx), X1 = Math.floor((e1 - ox) / sx), Y0 = Math.ceil((n0 - oy) / sy), Y1 = Math.floor((n1 - oy) / sy);
+    const url = new URL(`_nativ/schneiden?kachel=${encodeURIComponent(kachel)}&X0=${X0}&X1=${X1}&Y0=${Y0}&Y1=${Y1}`, self.location.href);
+    let leser, anzahl = -1, gelesen = 0, rest = new Uint8Array(0);
+    try {
+      const r = await fetch(url, { cache: 'no-store', signal: abbruch.signal });
+      if (!r.ok || !r.body) return false;
+      leser = r.body.getReader();
+      lesenMelden({ art: 'lesen', nr: t, von, gelesen: 0, gesamt: 0 });
+      for (;;) {
+        const { done, value } = await leser.read();
+        if (done) break;
+        let b = value;
+        if (rest.length) { b = new Uint8Array(rest.length + value.length); b.set(rest); b.set(value, rest.length); }
+        let o = 0;
+        if (anzahl < 0) {
+          if (b.length < 16) { rest = b.slice(); continue; }
+          if (b[0] !== 84 || b[1] !== 80 || b[2] !== 78 || b[3] !== 49) return false;      // „TPN1“
+          anzahl = Number(new DataView(b.buffer, b.byteOffset + 8, 8).getBigUint64(0, true));
+          o = 16;
+        }
+        const d = new DataView(b.buffer, b.byteOffset, b.byteLength);
+        for (; o + 15 <= b.length; o += 15) {
+          nimm(d.getInt32(o, true) * sx + ox, d.getInt32(o + 4, true) * sy + oy, d.getInt32(o + 8, true) * sz + oz,
+            b[o + 14], d.getUint16(o + 12, true));
+          gelesen++;
+        }
+        rest = b.slice(o);
+        lesenMelden({ art: 'lesen', nr: t, von, gelesen, gesamt: anzahl });
+        pruefen();
+      }
+    } catch (err) {
+      if (abbruch.signal.aborted || vorbei) throw new Error(ABGEBROCHEN);
+      if (!gelesen) { console.warn('Nativ:', err); return false; }
+      throw err;
+    }
+    if (anzahl < 0 && !gelesen) return false;
+    if (gelesen !== anzahl || rest.length) throw new Error('Nativ entpackt: Ergebnis unvollständig');
+    return true;
   }
 
   /* Überlappend: die Schnitte laufen nacheinander in einer Kette, gestartet je Kachel gleich
@@ -956,7 +1299,7 @@ async function ausschneiden({ kacheln, bereich, umriss, max, nurBoden, vorratMax
   zeiten.lesen = (performance.now() - uhr) / 1000;
   uhr = performance.now();
   const dichte = n / Math.max(1, maske ? maske.flaeche : (e1 - e0) * (n1 - n0));
-  const normalen = normalenRechnen(xyz, n, Math.max(0.8, Math.sqrt(12 / (Math.PI * dichte))));
+  const normalen = await normalenParallel(xyz, n, Math.max(0.8, Math.sqrt(12 / (Math.PI * dichte))));
   zeiten.normalen = (performance.now() - uhr) / 1000;
   if (abbruch.signal.aborted) throw new Error(ABGEBROCHEN);     // abgebrochen, während die Normalen liefen
   const fertigGitter = gitter ? gitterFertig(gitter, bereich, maske, zMin, ce, cn) : null;
@@ -972,6 +1315,7 @@ async function ausschneiden({ kacheln, bereich, umriss, max, nurBoden, vorratMax
     ...(fertigGitter ? [fertigGitter.z.buffer, fertigGitter.art.buffer] : [])]);
   } finally {
     if (pool) pool.ende();
+    if (stueckP) stueckP.ende();
     for (const D of vonDatei.values()) { try { D.h.close(); } catch (err) { /* schon zu */ } }
   }
 }
@@ -1085,12 +1429,24 @@ function gitterFertig(g, { e0, n0 }, maske, zMin, ce, cn) {
  * 2,5 D, und neun Zellen reichen. Ausgerichtet nach oben; als Int8 (×127),
  * damit 1,5 Mio. Punkte 4,5 MB brauchen statt 18. */
 function normalenRechnen(xyz, n, r = 0.8) {
+  const g = normalenGitter(xyz, n, r);
+  return normalenPunkte(xyz, n, r, g, null, true);
+}
+
+/** Lage des Gitters: Ecke, Zellen je Richtung (alle Punkte). */
+function normalenGitter(xyz, n, r) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (let i = 0; i < n; i++) {
     const x = xyz[3 * i], y = xyz[3 * i + 1];
     if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
   }
-  const nx = Math.max(1, Math.ceil((x1 - x0) / r) + 1), ny = Math.max(1, Math.ceil((y1 - y0) / r) + 1);
+  return { x0, y0, nx: Math.max(1, Math.ceil((x1 - x0) / r) + 1), ny: Math.max(1, Math.ceil((y1 - y0) / r) + 1) };
+}
+
+/** Normalen der Punkte, deren kern-Eintrag 1 ist (kern null: alle), in deren Reihenfolge; das Gitter
+ *  aus allen n Punkten mit der Lage g. Die Nachbarn kommen je Zelle in Reihenfolge des Index — so
+ *  rechnet ein Streifen (normalenParallel) bitgleich zum Ganzen. */
+function normalenPunkte(xyz, n, r, { x0, y0, nx, ny }, kern, melden) {
   const zelleVon = i => Math.floor((xyz[3 * i + 1] - y0) / r) * nx + Math.floor((xyz[3 * i] - x0) / r);
   // Zählsortierung der Punkte nach Zelle
   const start = new Uint32Array(nx * ny + 1);
@@ -1099,8 +1455,11 @@ function normalenRechnen(xyz, n, r = 0.8) {
   const pos = start.slice(0, nx * ny), folge = new Uint32Array(n);
   for (let i = 0; i < n; i++) folge[pos[zelleVon(i)]++] = i;
 
-  const aus = new Int8Array(n * 3), r2 = r * r;
-  for (let i = 0; i < n; i++) {
+  let m = n;
+  if (kern) { m = 0; for (let i = 0; i < n; i++) m += kern[i]; }
+  const aus = new Int8Array(m * 3), r2 = r * r;
+  for (let i = 0, o = 0; i < n; i++) {
+    if (kern && !kern[i]) continue;
     const px = xyz[3 * i], py = xyz[3 * i + 1], pz = xyz[3 * i + 2];
     const cx = Math.floor((px - x0) / r), cy = Math.floor((py - y0) / r);
     let k = 0, sx = 0, sy = 0, sz = 0, xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
@@ -1124,10 +1483,78 @@ function normalenRechnen(xyz, n, r = 0.8) {
       [ox, oy, oz] = kleinsteAchse(a, b, c, d, e, f);
       if (oz < 0) { ox = -ox; oy = -oy; oz = -oz; }
     }
-    aus[3 * i] = Math.round(ox * 127); aus[3 * i + 1] = Math.round(oy * 127); aus[3 * i + 2] = Math.round(oz * 127);
-    if ((i & 0x3ffff) === 0) self.postMessage({ art: 'normalen', fertig: i, gesamt: n });
+    aus[3 * o] = Math.round(ox * 127); aus[3 * o + 1] = Math.round(oy * 127); aus[3 * o + 2] = Math.round(oz * 127);
+    o++;
+    if (melden && (i & 0x3ffff) === 0) self.postMessage({ art: 'normalen', fertig: i, gesamt: n });
   }
   return aus;
+}
+
+/* Normalen auf allen Kernen (12.11.2026): Die Fläche wird in waagerechte Streifen von Gitterzeilen
+ * mit etwa gleich vielen Punkten geteilt; ein Hilfs-Worker (diese Datei, Auftrag 'normalenTeil')
+ * bekommt die Punkte seines Streifens plus je eine Zeile Rand (die Nachbarn) und rechnet die
+ * Normalen der Punkte im Streifen. Gitterlage und Reihenfolge der Nachbarn sind dieselben wie im
+ * Ganzen, das Ergebnis ist bitgleich zu normalenRechnen. Kopiert wird jeder Punkt etwa einmal.
+ * Scheitert etwas, rechnet der Haupt-Worker wie bisher allein. */
+const NORMALEN_PARALLEL_AB = 200000;
+async function normalenParallel(xyz, n, r) {
+  const helfer = Math.min(7, (self.navigator && navigator.hardwareConcurrency || 2) - 1);
+  if (n < NORMALEN_PARALLEL_AB || helfer < 2 || typeof Worker === 'undefined') return normalenRechnen(xyz, n, r);
+  const g = normalenGitter(xyz, n, r);
+  // Punkte je Gitterzeile, daraus die Streifen
+  const zeileVon = i => Math.floor((xyz[3 * i + 1] - g.y0) / r);
+  const jeZeile = new Uint32Array(g.ny);
+  for (let i = 0; i < n; i++) jeZeile[zeileVon(i)]++;
+  const grenzen = [0];
+  for (let y = 0, summe = 0; y < g.ny; y++) {
+    summe += jeZeile[y];
+    if (summe >= n * grenzen.length / helfer && grenzen.length < helfer && y + 1 < g.ny) grenzen.push(y + 1);
+  }
+  grenzen.push(g.ny);
+  const teile = [];
+  for (let s = 0; s + 1 < grenzen.length; s++) {
+    const a = grenzen[s], b = grenzen[s + 1];
+    let m = 0;
+    for (let y = Math.max(0, a - 1); y < Math.min(g.ny, b + 1); y++) m += jeZeile[y];
+    const sub = new Float32Array(m * 3), kern = new Uint8Array(m), index = [];
+    for (let i = 0, j = 0; i < n; i++) {
+      const y = zeileVon(i);
+      if (y < a - 1 || y > b) continue;
+      sub[3 * j] = xyz[3 * i]; sub[3 * j + 1] = xyz[3 * i + 1]; sub[3 * j + 2] = xyz[3 * i + 2];
+      if (y >= a && y < b) { kern[j] = 1; index.push(i); }
+      j++;
+    }
+    teile.push({ sub, kern, m, index: Uint32Array.from(index) });
+  }
+  const aus = new Int8Array(n * 3);
+  let fertig = 0;
+  const ergebnisse = teile.map(t => new Promise(res => {
+    let w;
+    try { w = new Worker('laser-werk.js'); } catch (err) { res(null); return; }
+    const ende = e => { w.terminate(); res(e); };
+    w.onmessage = ev => ende(ev.data && ev.data.normalen ? ev.data.normalen : null);
+    w.onerror = ev => { if (ev.preventDefault) ev.preventDefault(); console.warn('Normalen im Hilfs-Worker:', ev.message); ende(null); };
+    w.postMessage({ art: 'normalenTeil', xyz: t.sub, kern: t.kern, n: t.m, r, g }, [t.sub.buffer, t.kern.buffer]);
+  }).then(e => {
+    fertig += t.index.length;
+    self.postMessage({ art: 'normalen', fertig, gesamt: n });
+    return e;
+  }));
+  const fertige = await Promise.all(ergebnisse);
+  if (fertige.some(e => !e)) { console.warn('Normalen: Hilfs-Worker gescheitert, rechne allein'); return normalenRechnen(xyz, n, r); }
+  fertige.forEach((e, s) => {
+    const { index } = teile[s];
+    for (let k = 0; k < index.length; k++) {
+      const i = index[k];
+      aus[3 * i] = e[3 * k]; aus[3 * i + 1] = e[3 * k + 1]; aus[3 * i + 2] = e[3 * k + 2];
+    }
+  });
+  return aus;
+}
+/** Im Hilfs-Worker: die Normalen eines Streifens. */
+function normalenTeil({ xyz, kern, n, r, g }) {
+  const normalen = normalenPunkte(xyz, n, r, g, kern, false);
+  self.postMessage({ normalen }, [normalen.buffer]);
 }
 
 /** Eigenvektor zum kleinsten Eigenwert der symmetrischen Matrix
@@ -1582,6 +2009,8 @@ async function exportieren({ kacheln, bereich, umriss, einzeln, nurBoden, getren
 self.onmessage = async ev => {
   if (ev.data.art === 'abbrechen') { if (abbruch) abbruch.abort(); return; }
   if (ev.data.art === 'teilEntpacken') { teilAuftrag = ev.data; return; }       // Hilfs-Worker, siehe entpackPool
+  if (ev.data.art === 'stuecke') { stueckAuftrag(ev.data); return; }             // Hilfs-Worker, siehe stueckPool
+  if (ev.data.art === 'normalenTeil') { normalenTeil(ev.data); return; }          // Hilfs-Worker, siehe normalenParallel
   const istExport = ev.data.art === 'export';
   // Eins nach dem anderen: Laden und Export teilen sich den Speicher von laz-perf
   if (abbruch) { if (istExport) self.postMessage({ art: 'fehler', text: 'Es läuft noch ein Auftrag.', export: true }); return; }
