@@ -40,7 +40,9 @@
 importScripts('vendor/copc/copc.js');
 
 // Boden im Sinne der BVV: Boden, Gewässer, abgeleiteter Boden (Klassen 2, 9, 23, 24)
-const BODEN = new Set([2, 9, 23, 24]);
+const BODEN_BVV = [2, 9, 23, 24];
+// NRW: 2, 9, 26 — jeder Ausschnitt-Auftrag bringt seine mit (app.js, LASER_LAENDER), der Export nimmt die zuletzt gesetzten
+let BODEN = new Set(BODEN_BVV);
 
 let lazPerf = null;
 let abbruch = null;             // AbortController des laufenden Auftrags
@@ -2016,6 +2018,7 @@ self.onmessage = async ev => {
   if (abbruch) { if (istExport) self.postMessage({ art: 'fehler', text: 'Es läuft noch ein Auftrag.', export: true }); return; }
   abbruch = new AbortController();
   exportLaeuft = istExport;
+  if (!istExport && Array.isArray(ev.data.kacheln) && !ev.data.art) BODEN = new Set(ev.data.boden || BODEN_BVV);
   try {
     if (ev.data.art === 'speichern') await speichern(ev.data);
     else if (ev.data.art === 'entpacktSpeichern') await entpacktSpeichern(ev.data);

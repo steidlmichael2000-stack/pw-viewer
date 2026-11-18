@@ -15,7 +15,7 @@ import { OrbitControls } from './vendor/three/OrbitControls.js';
 
 /* Punktklassen der BVV (Beschreibung der Punktklassen, Stand September 2023).
  * Farben nach dem Brauch der Laser-Viewer: Boden braun, Bewuchs grün, Gebäude rot. */
-const KLASSEN = {
+const KLASSEN_BVV = {
   1: ['Unklassifiziert', '#9aa3ad'],
   2: ['Boden', '#b9824d'],
   6: ['Gebäude', '#e2543e'],
@@ -25,6 +25,23 @@ const KLASSEN = {
   23: ['Boden, abgeleitet', '#d8ad7c'],
   24: ['Boden aus bDOM', '#cbb08f']
 };
+/* Punktklassen von Geobasis NRW (Nutzerinformation 3D-Messdaten, Bezirksregierung Köln; info.klassen 'nw').
+ * 20 sind dort alle letzten Echos ohne Boden — Gebäude, Autos, auch Baumkronen —, 1 die Zwischenechos
+ * der Vegetation. Eine eigene Gebäudeklasse gibt es nicht. */
+const KLASSEN_NW = {
+  1: ['Unklassifiziert, Bewuchs', '#4fb35a'],
+  2: ['Boden', '#b9824d'],
+  9: ['Gewässer, aufgefüllt', '#3d86e0'],
+  17: ['Brücke', '#a274e3'],
+  18: ['Rauschen', '#ff453a'],
+  20: ['Letztes Echo, nicht Boden', '#d9d4c7'],
+  21: ['Gebäude, aufgefüllt', '#e2543e'],
+  24: ['Keller', '#8c6d4f'],
+  26: ['Boden, aufgefüllt', '#d8ad7c']
+};
+const KLASSEN_JE = { nw: KLASSEN_NW };
+// Je Ansicht gesetzt (laserAnsicht: info.klassen, info.boden, info.baumKlassen); ohne Angabe die der BVV
+let KLASSEN = KLASSEN_BVV;
 const klasseName = k => (KLASSEN[k] || [`Klasse ${k}`])[0];
 const klasseFarbe = k => (KLASSEN[k] || [0, '#c8c8c8'])[1];
 // Dieselben Töne wie die Höhenfarben auf der Karte (HOEHEN_RAMPE in app.js)
@@ -35,12 +52,13 @@ const RAMPE = ['#2c3e94', '#2a7dc4', '#33b2b0', '#7ccc6c', '#e6dd55', '#f19a3c',
  * kommt im PW-Viewer aus dem Dateinamen. */
 const LIZENZ_LINKS = {
   'CC BY 4.0': 'https://creativecommons.org/licenses/by/4.0/deed.de',
+  'dl-de/zero-2-0': 'https://www.govdata.de/dl-de/zero-2-0',
   'ODbL': 'https://www.openstreetmap.org/copyright',
   'dl-de/by-2-0': 'https://www.govdata.de/dl-de/by-2-0'
 };
 function lizenzTextSetzen(el, text) {
   el.replaceChildren();
-  for (const teil of String(text).split(/(CC BY 4\.0|ODbL|dl-de\/by-2-0)/)) {
+  for (const teil of String(text).split(/(CC BY 4\.0|ODbL|dl-de\/by-2-0|dl-de\/zero-2-0)/)) {
     if (!LIZENZ_LINKS[teil]) { if (teil) el.append(teil); continue; }
     const a = document.createElement('a');
     a.href = LIZENZ_LINKS[teil]; a.target = '_blank'; a.rel = 'noopener'; a.textContent = teil;
@@ -303,6 +321,8 @@ const GEB_FS = `
   uniform int boxModus;
   uniform vec3 boxMitte, boxHalb;
   uniform vec2 boxRot;
+  uniform sampler2D umrissTex;
+  uniform float umrissAn, umrissSeite;
   varying float vHell;
   varying vec3 vLokal;
   #ifdef DACHBILD
@@ -318,6 +338,8 @@ const GEB_FS = `
       vec3 b = vec3(boxRot.x * q.x + boxRot.y * q.y, -boxRot.y * q.x + boxRot.x * q.y, q.z);
       if (all(lessThanEqual(abs(b), boxHalb)) == (boxModus == 2)) discard;
     }
+    // Am Umriss der Auswahl (Rechteck, Polygon, Kreis) abgeschnitten wie die Punkte (umrissMaske in laser.js)
+    if (umrissAn > 0.5 && texture2D(umrissTex, vLokal.xy / umrissSeite + 0.5).a < 0.5) discard;
     float t = texelFetch(tiefe, ivec2(gl_FragCoord.xy), 0).r;
     if (t < 1.0 && linear(gl_FragCoord.z) > linear(t) + 0.3) discard;
     #ifdef DACHBILD
@@ -329,6 +351,15 @@ const GEB_FS = `
 /* Streckenachsen der DB InfraGO: der helle Lapis-Ton (wie im Dunkelmodus der
  * App), Ziel der Suche rot wie ein Kartenpin — Orange trägt schon das Messen. */
 const ACHS_FARBE = '#55a5e7';
+/* Bäume (18.11.2026): Kronen gedämpft grün, Stämme weiß — auch im Preset „Modell“ */
+const BAUM_FARBE = '#8aa77c';      // gedämpftes Salbeigrün (18.11.2026: „etwas zu grün“)
+const STAMM_FARBE = '#ecebe7';     // Stämme weiß wie das Modell
+/* Für die eigenen Shader (GEB_FS): die Hex-Werte so, wie sie im CSS stehen. new THREE.Color('#…') rechnet
+ * ins Lineare um, der Shader gibt das ohne Rückrechnung aus — das Grün wurde fast schwarz. */
+const shaderFarbe = hex => { const v = parseInt(hex.slice(1), 16); return new THREE.Color().setRGB((v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255); };
+/* Klassen, aus denen Bäume erkannt werden: BVV „Objekte, Bewuchs“, dazu die ASPRS-Vegetation anderer Wolken */
+const BAUM_KLASSEN_BVV = [3, 4, 5, 20];
+let BAUM_KLASSEN = new Set(BAUM_KLASSEN_BVV);
 /* Regen: gewünschte Zeitraffung (Sekunden Regen je Sekunde). Wie viele Schritte
  * je Bild gehen, regelt bild() nach der Bildrate — auf einer Intel-Grafik schaffte
  * „Schnell“ mit festen 140 Schritten nur 3 Bilder je Sekunde. */
@@ -338,8 +369,9 @@ const ZIEL_FARBE = '#ff453a';
  * Straßen auf Karten, abgestuft; Blau trägt die Bahn, Weiß die Höhenlinien. */
 const STR_FARBEN = ['#f5d76e', '#e9dfb4', '#cfc6a3'];
 const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-// Boden im Sinne der BVV: Boden, Gewässer, abgeleiteter Boden (wie in laser-werk.js)
-const BODEN = new Set([2, 9, 23, 24]);
+// Boden im Sinne der BVV: Boden, Gewässer, abgeleiteter Boden (wie in laser-werk.js); NRW über info.boden
+const BODEN_BVV = [2, 9, 23, 24];
+let BODEN = new Set(BODEN_BVV);
 
 /** Öffnet die Ansicht über der Karte. d: Ergebnis aus laser-werk.js,
  *  info: { kachel, quelle, seite }. Gibt eine Funktion zum Schließen zurück.
@@ -351,6 +383,9 @@ const BODEN = new Set([2, 9, 23, 24]);
  *  unterzeile, datenName (vor der Quellenangabe) und in d die Punktfarben rgb
  *  (Uint8, sRGB) — dann gibt es die Färbung „Farbe“ und sie ist die erste. */
 export function laserAnsicht(d, info, { beimSchliessen } = {}) {
+  KLASSEN = KLASSEN_JE[info.klassen] || KLASSEN_BVV;
+  BODEN = new Set(info.boden || BODEN_BVV);
+  BAUM_KLASSEN = new Set(info.baumKlassen || BAUM_KLASSEN_BVV);
   const wurzel = document.createElement('div');
   wurzel.className = 'laser-ansicht';
   wurzel.innerHTML = `
@@ -515,6 +550,15 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     <div class="lz-tafel" hidden>
       <!-- Oben fest die Punktgröße, darunter Abschnitte zum Aufklappen wie im Menü
            der Karte (.sheet-sec) — die Tafel wurde sonst zu lang. -->
+      <!-- Presets (18.11.2026, seine drei Einstellungen vom Tablet, fest, dazu „Modell“): ein Tipp stellt Darstellung,
+           Färbung, Regler, Effekte, Klassen, Auflagen und Ansicht auf einmal um (STILE). -->
+      <p class="pal-label lz-stil-titel">Preset</p>
+      <div class="seg seg-drei lz-stil" role="group" aria-label="Preset">
+        <button type="button" class="seg-btn" data-stil="realismus" data-ik="foto" title="Gelände im Luftbild, Gebäude LoD2 mit Luftbild-Dächern">Realismus</button>
+        <button type="button" class="seg-btn" data-stil="hoehe" data-ik="hoehe" title="Gelände nach Höhe, Höhenlinien, Schatten">Höhe</button>
+        <button type="button" class="seg-btn" data-stil="gelaende" data-ik="neigung" title="Geländeanalyse: nur der Boden, nach Neigung gefärbt, mit Höhenlinien">Neigung</button>
+        <button type="button" class="seg-btn" data-stil="modell" data-ik="haus" title="Weißes Massenmodell: Gelände, Gebäude und Bäume auf einem Sockel — mit der Auswahl „Kreis“ eine runde Scheibe">Modell</button>
+      </div>
       <!-- Punkte oder Gelände als Fläche (nur mit Bodenraster, d.gitter) -->
       <div class="seg seg-paar lz-darstellung" role="group" aria-label="Darstellung" hidden>
         <button type="button" class="seg-btn is-on" data-darstellung="punkte" data-ik="punkte">Punkte</button>
@@ -575,6 +619,8 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
           </label>
           <button type="button" class="seg-btn lz-klasse lz-kataster" aria-pressed="false">
             <span class="lz-feld" style="background:#ffd60a"></span><span class="lz-name">Kataster</span><small>aus</small></button>
+          <button type="button" class="seg-btn lz-klasse lz-baeume" aria-pressed="false" title="Einzelbäume aus den Laserpunkten über dem Boden erkannt">
+            <span class="lz-feld" style="background:${BAUM_FARBE}"></span><span class="lz-name">Bäume</span><small>aus</small></button>
           <button type="button" class="seg-btn lz-klasse lz-gipfel" aria-pressed="false" hidden>
             <span class="lz-feld" style="background:#ffffff"></span><span class="lz-name">Gipfel</span><small></small></button>
           <button type="button" class="seg-btn lz-klasse lz-kml" aria-pressed="false" hidden>
@@ -663,6 +709,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
   if (!info.achsen) weg('.lz-achsen');
   if (!info.strassen) weg('.lz-strassen');
   if (!info.kataster) weg('.lz-kataster');
+  if (!d.klassen.some(([k]) => BAUM_KLASSEN.has(k)) || !d.klassen.some(([k]) => BODEN.has(k))) weg('.lz-baeume');
   if (!info.gebaeude && !info.achsen && !info.kml && !info.strassen && !info.gipfel && !info.kataster) weg('.lz-aufl-titel');
   if (!info.exportieren) weg('[data-lz="export"], [data-bereich="export"]');
   if (!info.utm) weg('.lz-ort');
@@ -757,9 +804,39 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
 
   // Gebäude (LoD2), nach den Punkten über das fertige Bild gezeichnet (GEB_FS)
   const gebSzene = new THREE.Scene();
+  /* Umriss der Auswahl (info.umriss, UTM32) lokal und als Maske für Gebäude und Bäume: weiß innen,
+   * 2048 px über die Seite des Ausschnitts. Ohne Umriss (Rahmen, Kacheln) bleibt sie aus. */
+  const umrissLokal = Array.isArray(info.umriss) && info.umriss.length >= 3
+    ? info.umriss.map(([e, nn]) => [e - d.mitte[0], nn - d.mitte[1]]) : null;
+  const imUmriss = (x, y) => {
+    let drin = false;
+    for (let i = 0, j = umrissLokal.length - 1; i < umrissLokal.length; j = i++) {
+      const [xa, ya] = umrissLokal[j], [xb, yb] = umrissLokal[i];
+      if ((ya > y) !== (yb > y) && x < xa + (y - ya) * (xb - xa) / (yb - ya)) drin = !drin;
+    }
+    return drin;
+  };
+  const umrissU = { tex: { value: null }, an: { value: 0 }, seite: { value: info.seite } };
+  if (umrissLokal) {
+    const W = 2048, c = document.createElement('canvas');
+    c.width = c.height = W;
+    const g = c.getContext('2d'), k = W / info.seite;
+    g.fillStyle = '#fff';
+    g.beginPath();
+    umrissLokal.forEach(([x, y], i) => g[i ? 'lineTo' : 'moveTo']((x + info.seite / 2) * k, (info.seite / 2 - y) * k));
+    g.closePath();
+    g.fill();
+    const t = new THREE.CanvasTexture(c);
+    // Ohne Mipmaps: verkleinert zerfloss der Rand bei flachem Blick, Gebäudeteile standen meterweit neben der Scheibe
+    t.generateMipmaps = false;
+    t.minFilter = t.magFilter = THREE.LinearFilter;
+    umrissU.tex.value = t;
+    umrissU.an.value = 1;
+  }
   const gebUniforms = () => ({ tiefe: edl.uniforms.tiefe, nah: edl.uniforms.nah, fern: edl.uniforms.fern,
     ortho: edl.uniforms.ortho, lichtRichtung: material.uniforms.lichtRichtung,
-    boxModus: material.uniforms.boxModus, boxMitte: material.uniforms.boxMitte, boxHalb: material.uniforms.boxHalb, boxRot: material.uniforms.boxRot });
+    boxModus: material.uniforms.boxModus, boxMitte: material.uniforms.boxMitte, boxHalb: material.uniforms.boxHalb, boxRot: material.uniforms.boxRot,
+    umrissTex: umrissU.tex, umrissAn: umrissU.an, umrissSeite: umrissU.seite });
   const gebFlaecheMat = new THREE.ShaderMaterial({ vertexShader: GEB_VS, fragmentShader: GEB_FS, transparent: true,
     side: THREE.DoubleSide, depthWrite: true,
     uniforms: { ...gebUniforms(), kante: { value: 0 }, deckung: { value: 0.5 }, farbe: { value: new THREE.Color(0.86, 0.88, 0.92) },
@@ -857,6 +934,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
    * Siehe GEL_VS. Nur, wenn der Worker ein Bodenraster mitgeschickt hat (Topovo, nicht der PW-Viewer). */
   const G = d.gitter || null;
   let gelaende = null, darstellung = 'punkte';
+  let modellLook = false;     // Preset „Modell“: Gelände, Gebäude, Bäume weiß (modellSetzen)
   if (G) {
     const N = G.nx * G.ny, hd = new Float32Array(N * 2);
     for (let c = 0; c < N; c++) { hd[2 * c] = G.art[c] === 2 ? 0 : G.z[c]; hd[2 * c + 1] = G.art[c]; }
@@ -921,7 +999,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     } else if (faerbung === 'hoehe') u.modus.value = 1;
     else if (faerbung === 'klasse') { u.modus.value = 3; u.grundFarbe.value.copy(klassenFarben.get(2) || new THREE.Color(klasseFarbe(2))); }
     else if (faerbung === 'neigung') u.modus.value = 4;
-    else { u.modus.value = 0; u.grundFarbe.value.setRGB(0.82, 0.82, 0.82); }
+    else { u.modus.value = 0; const w = modellLook ? 0.94 : 0.82; u.grundFarbe.value.setRGB(w, w, w); }
     neu = true;
   }
 
@@ -985,6 +1063,12 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     masken[Number(b.dataset.klasse) & 31] = an ? 1 : 0;
     neu = true;
   }));
+  // Rauschen (NRW Klasse 18: Vögel, Wolken, Dampf) gleich aus — die Punkte hängen sonst hoch über der Wolke
+  // Nicht per click(): der Handler setzt `neu`, das hier noch nicht deklariert ist (gezeichnet wird ohnehin erst später)
+  if (KLASSEN === KLASSEN_NW) {
+    const b = $('[data-klasse="18"]');
+    if (b) { b.classList.remove('is-on'); b.setAttribute('aria-pressed', 'false'); masken[18] = 0; }
+  }
 
   /* Kurzer Hinweis über der Fußzeile, wo beim Öffnen die Bedienung steht */
   let hinweisUhr = 0;
@@ -1016,7 +1100,8 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     if (!info.quelleKurz) { fuss.replaceChildren(lang, punkte); return; }
     const kurz = document.createElement('span');
     kurz.className = 'lz-fuss-kurz';
-    lizenzTextSetzen(kurz, (mitAchsen ? info.quelleKurz.replace('© BVV', '© BVV, DB InfraGO') : info.quelleKurz) +
+    lizenzTextSetzen(kurz, (!mitAchsen ? info.quelleKurz : info.quelleKurz.includes('© BVV')
+      ? info.quelleKurz.replace('© BVV', '© BVV, DB InfraGO') : `${info.quelleKurz} · © DB InfraGO (CC BY 4.0)`) +
       // Kurz, damit es am Handy in eine Zeile passt (mit „OpenStreetMap“ stand das ⓘ allein in einer zweiten);
       // die ganze Angabe kommt per Tipp. Das ⓘ hängt fest am letzten Wort.
       (osm.length ? ' · © OSM (ODbL)' : '') + '\u00a0ⓘ');
@@ -1548,7 +1633,12 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       const roh = await lod2Holen();
       if (!laeuft) return;
       // Nur Gebäude mit der Mitte dort, wo Punkte geladen sind (imGebiet) — nicht im ganzen Quadrat
-      const liste = roh.filter(b => imGebiet((b.bb[0] + b.bb[2]) / 2 - d.mitte[0], (b.bb[1] + b.bb[3]) / 2 - d.mitte[1]));
+      /* Mit Umriss: jedes Gebäude, das hineinragt (Mitte oder eine Ecke der Hülle drin) — der Shader
+       * schneidet es am Umriss ab (18.11.2026 gewünscht). Sonst nach der Mitte, wo Punkte liegen. */
+      const liste = umrissLokal
+        ? roh.filter(b => [[0, 1], [2, 1], [2, 3], [0, 3]].some(([i, j]) => imUmriss(b.bb[i] - d.mitte[0], b.bb[j] - d.mitte[1]))
+          || imUmriss((b.bb[0] + b.bb[2]) / 2 - d.mitte[0], (b.bb[1] + b.bb[3]) / 2 - d.mitte[1]))
+        : roh.filter(b => imGebiet((b.bb[0] + b.bb[2]) / 2 - d.mitte[0], (b.bb[1] + b.bb[3]) / 2 - d.mitte[1]));
       geb = gebaeudeBauen(liste);
       gebSzene.add(geb.gruppe);
       quellenNeu();
@@ -1563,6 +1653,237 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       gebKnopf.classList.remove('laedt');
     }
   });
+
+  /* ---------- Bäume ----------
+   * Einzelbäume aus den Laserpunkten (18.11.2026, nach dem Video zu STEP Topo): Höhe über dem
+   * Boden je Zelle (Kronenmodell), geglättet; Spitzen sind die höchsten Zellen in einem Fenster,
+   * das mit der Baumhöhe wächst. Die Krone reicht in acht Richtungen, bis das Modell unter 40 %
+   * der Höhe fällt oder wieder ansteigt (nächster Baum). Gezeichnet als Ellipsoid auf einem Stamm,
+   * alles in einer Geometrie mit dem Shader der Gebäude (verdeckt von Punkten und Gelände). */
+  let baeume = null;
+  const baumKnopf = $('.lz-baeume');
+  const baumMat = new THREE.ShaderMaterial({ vertexShader: GEB_VS, fragmentShader: GEB_FS, depthWrite: true, side: THREE.DoubleSide,
+    uniforms: { ...gebUniforms(), kante: { value: 0 }, deckung: { value: 1 }, farbe: { value: shaderFarbe(BAUM_FARBE) } } });
+  const stammMat = new THREE.ShaderMaterial({ vertexShader: GEB_VS, fragmentShader: GEB_FS, depthWrite: true, side: THREE.DoubleSide,
+    uniforms: { ...gebUniforms(), kante: { value: 0 }, deckung: { value: 1 }, farbe: { value: shaderFarbe(STAMM_FARBE) } } });
+  function baeumeFinden() {
+    // Boden je 2-m-Zelle (Mittel), Lücken unter dichtem Bewuchs von den Nachbarn gefüllt
+    const GZ = 2, gb = Math.ceil(info.seite / GZ) + 1, gs = new Float32Array(gb * gb), gn = new Uint16Array(gb * gb);
+    const zellAus = (v, z, b) => Math.min(b - 1, Math.max(0, Math.floor((v + halb) / z)));
+    for (let i = 0; i < n; i++) {
+      if (!BODEN.has(d.klasse[i])) continue;
+      const c = zellAus(d.xyz[3 * i + 1], GZ, gb) * gb + zellAus(d.xyz[3 * i], GZ, gb);
+      gs[c] += d.xyz[3 * i + 2]; gn[c]++;
+    }
+    const boden = new Float32Array(gb * gb).fill(NaN);
+    for (let c = 0; c < gb * gb; c++) if (gn[c]) boden[c] = gs[c] / gn[c];
+    for (let runde = 0, offen = true; offen && runde < 60; runde++) {
+      offen = false;
+      const neuB = boden.slice();
+      for (let y = 0; y < gb; y++) for (let x = 0; x < gb; x++) {
+        const c = y * gb + x;
+        if (boden[c] === boden[c]) continue;
+        let s = 0, a = 0;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const qx = x + dx, qy = y + dy;
+          if (qx < 0 || qy < 0 || qx >= gb || qy >= gb) continue;
+          const v = boden[qy * gb + qx];
+          if (v === v) { s += v; a++; }
+        }
+        if (a) neuB[c] = s / a; else offen = true;
+      }
+      boden.set(neuB);
+    }
+    const bodenAn = (x, y) => boden[zellAus(y, GZ, gb) * gb + zellAus(x, GZ, gb)];
+    // Kronenmodell: höchste Vegetation über dem Boden je Zelle, bei ausgedünnten Wolken gröber
+    const Z = Math.max(1, Math.min(3, abstandPunkte * 1.6)), b = Math.ceil(info.seite / Z) + 1;
+    const chm = new Float32Array(b * b);
+    /* Wo Gebäudepunkte liegen (mit einer Zelle Rand), wächst kein Baum: „Objekte, Bewuchs“ enthält
+     * auch Gauben, Kamine und Dachaufbauten — in der Altstadt standen sonst Bäume auf den Dächern. */
+    const haus = new Uint8Array(b * b);
+    for (let i = 0; i < n; i++) {
+      if (d.klasse[i] !== 6) continue;
+      const cx = zellAus(d.xyz[3 * i], Z, b), cy = zellAus(d.xyz[3 * i + 1], Z, b);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const qx = cx + dx, qy = cy + dy;
+        if (qx >= 0 && qy >= 0 && qx < b && qy < b) haus[qy * b + qx] = 1;
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      if (!BAUM_KLASSEN.has(d.klasse[i])) continue;
+      const x = d.xyz[3 * i], y = d.xyz[3 * i + 1], g = bodenAn(x, y);
+      if (g !== g) continue;
+      const h = d.xyz[3 * i + 2] - g, c = zellAus(y, Z, b) * b + zellAus(x, Z, b);
+      if (!haus[c] && h > chm[c]) chm[c] = h;
+    }
+    // Glätten (3 × 3, Mitte vierfach), damit eine Krone nicht in viele Spitzen zerfällt
+    const gl = new Float32Array(b * b);
+    for (let y = 1; y < b - 1; y++) for (let x = 1; x < b - 1; x++) {
+      const c = y * b + x;
+      if (!chm[c]) continue;
+      gl[c] = (4 * chm[c] + 2 * (chm[c - 1] + chm[c + 1] + chm[c - b] + chm[c + b])
+        + chm[c - b - 1] + chm[c - b + 1] + chm[c + b - 1] + chm[c + b + 1]) / 16;
+    }
+    const liste = [];
+    const RICHTUNG = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+    for (let y = 2; y < b - 2; y++) for (let x = 2; x < b - 2; x++) {
+      const c = y * b + x, h = gl[c];
+      if (h < 3) continue;
+      const w = Math.max(1, Math.round(Math.min(4.5, 1.2 + 0.09 * h) / Z));
+      let spitze = true, voll = 0, alle = 0;
+      for (let dy = -w; dy <= w && spitze; dy++) for (let dx = -w; dx <= w; dx++) {
+        if (dx * dx + dy * dy > w * w) continue;
+        const qx = x + dx, qy = y + dy;
+        if (qx < 0 || qy < 0 || qx >= b || qy >= b) continue;
+        const v = gl[qy * b + qx];
+        alle++; if (chm[qy * b + qx] > 0) voll++;
+        // Gleich hoch: nur die erste (unten links) gilt
+        if (v > h || (v === h && (dy < 0 || (dy === 0 && dx < 0)))) { spitze = false; break; }
+      }
+      // Leitungen, Masten, einzelne Ausreißer: um die Spitze zu wenig Bewuchs
+      if (!spitze || voll < alle * 0.45) continue;
+      let summe = 0;
+      for (const [rx, ry] of RICHTUNG) {
+        const schritt = Math.hypot(rx, ry) * Z;
+        let k = 1, vorher = h;
+        for (; k * schritt < 12; k++) {
+          const qx = x + rx * k, qy = y + ry * k;
+          if (qx < 0 || qy < 0 || qx >= b || qy >= b) break;
+          const v = gl[qy * b + qx];
+          if (v < h * 0.4 || v > vorher + 0.4) break;
+          vorher = v;
+        }
+        summe += (k - 0.5) * schritt;
+      }
+      const r = Math.min(12, Math.max(1, summe / RICHTUNG.length));
+      const px = -halb + (x + 0.5) * Z, py = -halb + (y + 0.5) * Z;
+      if (!imGebiet(px, py)) continue;
+      liste.push({ x: px, y: py, z: bodenAn(px, py), h: chm[c] || h, r });
+    }
+    return liste;
+  }
+  // Grundformen: Ikosaeder zweimal geteilt für die Krone, sechseckiger Stamm
+  const KRONE = (() => {
+    const g = new THREE.IcosahedronGeometry(1, 2).toNonIndexed();
+    return g.attributes.position.array;
+  })();
+  function baeumeBauen(liste) {
+    // Kronen und Stämme getrennt, je eigene Farbe
+    const STAMM = 6, nKrone = KRONE.length / 3, nStamm = STAMM * 6;
+    const pos = new Float32Array(liste.length * nKrone * 3), nor = new Float32Array(pos.length);
+    const sPos = new Float32Array(liste.length * nStamm * 3), sNor = new Float32Array(sPos.length);
+    let o = 0, so = 0;
+    const setz = (x, y, z, nx, ny, nz) => { pos[o] = x; pos[o + 1] = y; pos[o + 2] = z; nor[o] = nx; nor[o + 1] = ny; nor[o + 2] = nz; o += 3; };
+    const setzS = (x, y, z, nx, ny, nz) => { sPos[so] = x; sPos[so + 1] = y; sPos[so + 2] = z; sNor[so] = nx; sNor[so + 1] = ny; sNor[so + 2] = nz; so += 3; };
+    for (const t of liste) {
+      const ansatz = t.h * (t.h < 6 ? 0.2 : 0.32), rz = (t.h - ansatz) / 2, mz = t.z + ansatz + rz;
+      for (let k = 0; k < KRONE.length; k += 3) {
+        const ux = KRONE[k], uy = KRONE[k + 1], uz = KRONE[k + 2];
+        const nx = ux / t.r, ny = uy / t.r, nz = uz / rz, l = Math.hypot(nx, ny, nz) || 1;
+        setz(t.x + ux * t.r, t.y + uy * t.r, mz + uz * rz, nx / l, ny / l, nz / l);
+      }
+      const sr = Math.min(0.45, Math.max(0.12, t.r * 0.08)), oben = t.z + ansatz + rz * 0.3;
+      for (let k = 0; k < STAMM; k++) {
+        const w0 = k / STAMM * 2 * Math.PI, w1 = (k + 1) / STAMM * 2 * Math.PI;
+        const a = [Math.cos(w0), Math.sin(w0)], c = [Math.cos(w1), Math.sin(w1)];
+        for (const [q, zz] of [[a, t.z - 0.3], [c, t.z - 0.3], [c, oben], [a, t.z - 0.3], [c, oben], [a, oben]]) setzS(t.x + q[0] * sr, t.y + q[1] * sr, zz, q[0], q[1], 0);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    g.computeBoundingSphere();
+    if (g.boundingSphere.radius > 0) kugelWolke.union(g.boundingSphere);
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute('position', new THREE.BufferAttribute(sPos, 3));
+    sg.setAttribute('normal', new THREE.BufferAttribute(sNor, 3));
+    const gruppe = new THREE.Group();
+    gruppe.add(new THREE.Mesh(g, baumMat), new THREE.Mesh(sg, stammMat));
+    gebSzene.add(gruppe);
+    return { gruppe, anzahl: liste.length };
+  }
+  function baeumeZeigen(an) {
+    if (an && !baeume) {
+      const t0 = performance.now(), liste = baeumeFinden();
+      baeume = baeumeBauen(liste);
+      console.info(`Bäume: ${liste.length} in ${Math.round(performance.now() - t0)} ms`);
+      if (!liste.length) hinweis('Im Ausschnitt ließ sich kein Baum erkennen.');
+    }
+    if (baeume) baeume.gruppe.visible = an;
+    baumKnopf.classList.toggle('is-on', an);
+    baumKnopf.setAttribute('aria-pressed', String(an));
+    baumKnopf.querySelector('small').textContent = an ? `${baeume.anzahl.toLocaleString('de-DE')} Bäume` : 'aus';
+    neu = true;
+  }
+  if (baumKnopf) baumKnopf.addEventListener('click', () => baeumeZeigen(!(baeume && baeume.gruppe.visible)));
+
+  /* ---------- Modell (Preset) ----------
+   * Weißes Massenmodell wie ein Architekturmodell: Gelände, Gebäude und Bäume hell und deckend,
+   * dazu ein Sockel um den Umriss der Auswahl (beim Kreis eine runde Scheibe). */
+  const SOCKEL_FARBE = new THREE.Color(0.80, 0.80, 0.80);
+  const sockelMat = new THREE.ShaderMaterial({ vertexShader: GEB_VS, fragmentShader: GEB_FS, depthWrite: true, side: THREE.DoubleSide,
+    uniforms: { ...gebUniforms(), kante: { value: 0 }, deckung: { value: 1 }, farbe: { value: SOCKEL_FARBE } } });
+  let sockel = null;
+  function sockelBauen() {
+    // Umriss lokal (info.umriss in UTM32), sonst das Quadrat des Ausschnitts
+    const u = umrissLokal || [[-halb, -halb], [halb, -halb], [halb, halb], [-halb, halb]];
+    const cx = u.reduce((a, p) => a + p[0], 0) / u.length, cy = u.reduce((a, p) => a + p[1], 0) / u.length;
+    const zelle = G ? G.zelle : 2;
+    const hoeheAn = (x, y) => {
+      const z = G ? gelaendeHoehe(x, y) : NaN;
+      if (z === z) return z;
+      const bz = bodenHoehe(x, y);
+      return bz ? bz.z : NaN;
+    };
+    // Entlang des Umrisses alle zelle Meter, je Stelle eine halbe Zelle nach innen (dort endet die Fläche)
+    const rand = [];
+    for (let i = 0; i < u.length; i++) {
+      const [xa, ya] = u[i], [xb, yb] = u[(i + 1) % u.length];
+      const t = Math.max(1, Math.ceil(Math.hypot(xb - xa, yb - ya) / zelle));
+      for (let s = 0; s < t; s++) {
+        let x = xa + (xb - xa) * s / t, y = ya + (yb - ya) * s / t;
+        const dx = cx - x, dy = cy - y, l = Math.hypot(dx, dy) || 1;
+        x += dx / l * zelle * 0.5; y += dy / l * zelle * 0.5;
+        let z = NaN;
+        for (const k of [0.5, 1, 2, 4]) { z = hoeheAn(x + dx / l * zelle * k, y + dy / l * zelle * k); if (z === z) break; }
+        rand.push([x, y, z]);
+      }
+    }
+    // Lücken (kein Boden in der Nähe) mit dem Nachbarn füllen
+    for (let k = 0; k < 2; k++) for (let i = 0; i < rand.length; i++) if (rand[i][2] !== rand[i][2]) {
+      const a = rand[(i + rand.length - 1) % rand.length][2], c = rand[(i + 1) % rand.length][2];
+      rand[i][2] = a === a ? a : c;
+    }
+    const ok = rand.filter(p => p[2] === p[2]);
+    if (ok.length < 3) return null;
+    const zs = ok.map(p => p[2]), zMinR = Math.min(...zs), zMaxR = Math.max(...zs);
+    const unten = zMinR - Math.max(4, (zMaxR - zMinR) * 0.25, info.seite * 0.02);
+    const pos = [], nor = [];
+    for (let i = 0; i < rand.length; i++) {
+      const a = rand[i], c = rand[(i + 1) % rand.length];
+      if (a[2] !== a[2] || c[2] !== c[2]) continue;
+      const nx = c[1] - a[1], ny = -(c[0] - a[0]), l = Math.hypot(nx, ny) || 1;
+      const q = [[a[0], a[1], a[2]], [c[0], c[1], c[2]], [c[0], c[1], unten], [a[0], a[1], a[2]], [c[0], c[1], unten], [a[0], a[1], unten]];
+      for (const p of q) { pos.push(...p); nor.push(nx / l, ny / l, 0); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    const m = new THREE.Mesh(g, sockelMat);
+    gebSzene.add(m);
+    return m;
+  }
+  function modellSetzen(an) {
+    if (an === modellLook) return;
+    modellLook = an;
+    gebFlaecheMat.uniforms.farbe.value.setRGB(...(an ? [0.95, 0.95, 0.94] : [0.86, 0.88, 0.92]));
+    gebFlaecheMat.uniforms.deckung.value = an ? 1 : 0.5;
+    gebKanteMat.uniforms.deckung.value = an ? 0.35 : 0.9;
+    if (an && !sockel) sockel = sockelBauen();
+    if (sockel) sockel.visible = an;
+    gelFaerben();
+    neu = true;
+  }
 
   /* ---------- Auflagen: Streckenachsen, KML, gesuchte Stelle ----------
    * Alles kommt zweidimensional aus app.js (laserAchsen, laserKml: UTM32) und
@@ -2049,7 +2370,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     let text;
     if (exOriginal()) {
       const g = exKacheln.reduce((s, k) => s + k.groesse, 0);
-      text = `${exKacheln.length} × LAZ der BVV, unverändert · ${MB(g)}`;
+      text = `${exKacheln.length} × LAZ ${info.lazName || 'der BVV'}, unverändert · ${MB(g)}`;
     } else {
       let punkte = 0;
       if (ex.umfang === 'kacheln') punkte = exKacheln.reduce((s, k) => s + k.anzahl, 0);
@@ -3164,7 +3485,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
           if (gebaeude === 'punkte') regenGebQuelle = 'punkte';
           if (!laeuft) return false;
         }
-        const r = regenAnlegen({ renderer, d, seite: info.seite, gebaeude,
+        const r = regenAnlegen({ renderer, d, seite: info.seite, gebaeude, boden: [...BODEN],
           lichtRichtung: material.uniforms.lichtRichtung, tiefeUniforms: { tiefe: edl.uniforms.tiefe, nah: edl.uniforms.nah, fern: edl.uniforms.fern, ortho: edl.uniforms.ortho } });
         if (r.fehler) { hinweis(r.fehler); return false; }
         regen = r;
@@ -3469,7 +3790,7 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       gelaende.visible = sichtbar;
     }
     if (regen) renderer.render(regen.szene, kamera);
-    if (geb && geb.gruppe.visible) renderer.render(gebSzene, kamera);
+    if ((geb && geb.gruppe.visible) || (baeume && baeume.gruppe.visible) || (sockel && sockel.visible)) renderer.render(gebSzene, kamera);
     if (effekte.linien) renderer.render(linienSzene, kamera);
     boxKlippen();
     renderer.render(auflSzene, kamera);
@@ -3633,13 +3954,15 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       achsen: achsen ? achsen.gruppe.visible : gemerkt.achsen,
       strassen: strassen ? strassen.gruppe.visible : strLaedt || false, strBreite: strBreite(),
       kataster: kataster ? kataster.gruppe.visible : katLaedt || false,
+      baeume: !!(baeume && baeume.gruppe.visible),
       kmlBreite: kmlAufl && kmlAufl.linien.length ? kmlBreite() : gemerkt.kmlBreite,
       kml: kmlAufl && kmlAufl.anzahl ? kmlAufl.gruppe.visible : gemerkt.kml,
       gipfel: gipfelAufl ? gipfelAufl.gruppe.visible : gemerkt.gipfel,
       kamera: kamera === orthoKamera ? 'ortho' : 'perspektive',
       darstellung: gelaende ? darstellung : gemerkt.darstellung,
       grund: wurzel.dataset.grund,
-      offen: [...tafel.querySelectorAll('details')].map(x => x.open)
+      offen: [...tafel.querySelectorAll('details')].map(x => x.open),
+      stil: typeof stilAktiv === 'string' ? stilAktiv : undefined
     };
   }
   function einstSpeichern() {
@@ -3660,11 +3983,99 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
     if (g.dach === 'luftbild' && info.gebaeude && info.luftbild) dachSetzen('luftbild');
     if (g.strassen && strKnopf && info.strassen) strKnopf.click();
     if (g.kataster && katKnopf && info.kataster) katKnopf.click();
+    if (g.baeume && baumKnopf && !baumKnopf.hidden) baeumeZeigen(true);
     if (g.kamera === 'ortho') klick('[data-kamera="ortho"]');
     if (g.grund && g.grund !== wurzel.dataset.grund) klick(`.lz-tafel [data-grund="${g.grund}"]`);
     if (Array.isArray(g.offen)) tafel.querySelectorAll('details').forEach((x, i) => { if (typeof g.offen[i] === 'boolean') x.open = g.offen[i]; });
   }
   einstAnwenden(gemerkt);
+
+  /* ---------- Stile ----------
+   * Drei feste Zusammenstellungen (18.11.2026: „mach diese 3 Presets mal fest“ — von seinem
+   * Tablet abgelesen). Anders als einstAnwenden schalten sie auch aus. groesse in Metern;
+   * fehlt sie, bleibt die Punktgröße. klassenAus: diese Klassen aus, alle anderen an; nurBoden: nur BODEN an. */
+  const STILE = {
+    realismus: { darstellung: 'gelaende', groesse: 0.4, faerbung: 'luftbild', licht: 0, edl: 0,
+      effekte: { verdeckung: false, kugeln: true, linien: false }, klassenAus: [6, 18],
+      geb: true, dach: 'luftbild', achsen: true, strassen: true, kataster: false, kamera: 'perspektive', grund: 'verlauf' },
+    hoehe: { darstellung: 'gelaende', groesse: 0.4, faerbung: 'hoehe', licht: 55, edl: 20,
+      effekte: { verdeckung: true, kugeln: true, linien: true }, klassenAus: [6, 18],
+      geb: true, dach: 'grau', achsen: true, strassen: false, kataster: false, kamera: 'perspektive', grund: 'verlauf' },
+    // Geländeanalyse (18.11.2026 statt „Neigung“ mit Bewuchs): nur Boden, als Fläche, wo es ein Bodenraster gibt
+    gelaende: { darstellung: 'gelaende', faerbung: 'neigung', licht: 100, edl: 10,
+      effekte: { verdeckung: false, kugeln: false, linien: true }, nurBoden: true,
+      geb: false, achsen: true, strassen: false, kataster: false, kamera: 'perspektive', grund: 'verlauf' },
+    // Modell (18.11.2026, nach dem Video zu STEP Topo): weißes Massenmodell, Bäume aus den Laserpunkten, Sockel
+    modell: { darstellung: 'gelaende', faerbung: 'normalen', licht: 80, edl: 35,
+      effekte: { verdeckung: false, kugeln: false, linien: false }, nurBoden: true,
+      geb: true, dach: 'grau', baeume: true, achsen: false, strassen: false, kataster: false, kamera: 'perspektive', grund: 'verlauf' }
+  };
+  const stilKnoepfe = wurzel.querySelectorAll('[data-stil]');
+  let stilAktiv = null, stilWendet = false;
+  const stilMarkieren = art => {
+    stilAktiv = art;
+    if (art) modellSetzen(art === 'modell');
+    stilKnoepfe.forEach(b => b.classList.toggle('is-on', b.dataset.stil === art));
+  };
+  function stilAnwenden(art) {
+    const g = STILE[art];
+    if (!g) return;
+    stilWendet = true;
+    modellSetzen(art === 'modell');
+    try {
+      const klick = sel => { const b = typeof sel === 'string' ? $(sel) : sel; if (b && !b.hidden && !b.disabled) b.click(); };
+      if (g.darstellung && gelaende && g.darstellung !== darstellung) darstellungSetzen(g.darstellung);
+      // Färbung vor den Reglern: „Normalen“ und „Intensität“ stellen den Schatten selbst
+      if (g.faerbung && g.faerbung !== faerbungWahl) klick(`[data-faerbung="${g.faerbung}"]`);
+      if (Number.isFinite(g.groesse)) groesse.value = String(Math.min(400, Math.max(5, Math.round(g.groesse * 20) * 5)));
+      edlRegler.value = String(g.edl);
+      if (!lichtRegler.disabled) lichtRegler.value = String(g.licht);
+      reglerZeigen();
+      for (const e of Object.keys(effekte)) if (!!g.effekte[e] !== effekte[e]) klick(`[data-effekt="${e}"]`);
+      wurzel.querySelectorAll('.lz-klassenliste [data-klasse]').forEach(b => {
+        const k = Number(b.dataset.klasse), soll = g.nurBoden ? BODEN.has(k) : !g.klassenAus.includes(k);
+        if (soll !== b.classList.contains('is-on')) b.click();
+      });
+      if (info.gebaeude) {
+        const gebAn = geb ? geb.gruppe.visible : gebLaeuft;
+        if (g.geb !== gebAn) klick(gebKnopf);
+        if (g.geb && g.dach && (g.dach === 'luftbild') !== dachBild && (g.dach !== 'luftbild' || info.luftbild)) dachSetzen(g.dach);
+      }
+      if (baumKnopf && !baumKnopf.hidden && !!g.baeume !== !!(baeume && baeume.gruppe.visible)) baeumeZeigen(!!g.baeume);
+      if (info.achsen) {
+        if (achsen) { if (g.achsen !== achsen.gruppe.visible) klick(achsKnopf); }
+        else gemerkt.achsen = g.achsen;        // lädt noch — achsenLaden schaut nach gemerkt.achsen
+      }
+      if (info.strassen && strKnopf) {
+        const strAn = strassen ? strassen.gruppe.visible : strLaedt;
+        if (g.strassen !== strAn) klick(strKnopf);
+      }
+      if (info.kataster && katKnopf) {
+        const katAn = kataster ? kataster.gruppe.visible : katLaedt;
+        if (g.kataster !== katAn) klick(katKnopf);
+      }
+      if (g.kamera && (g.kamera === 'ortho') !== (kamera === orthoKamera)) klick(`[data-kamera="${g.kamera}"]`);
+      if (g.grund && g.grund !== wurzel.dataset.grund) klick(`.lz-tafel [data-grund="${g.grund}"]`);
+    } finally { stilWendet = false; }
+    stilMarkieren(art);
+  }
+  stilKnoepfe.forEach(b => b.addEventListener('click', () => stilAnwenden(b.dataset.stil)));
+  // Wer danach selbst etwas verstellt, ist nicht mehr in diesem Stil
+  const stilVerlassen = ev => {
+    if (stilWendet || !stilAktiv || ev.target.closest('.lz-stil, summary')) return;
+    if (!ev.target.closest('button, input')) return;
+    stilMarkieren(null);
+    // Das weiße Modell bleibt beim Schalten der Auflagen und Regler, nur eine andere Färbung oder Darstellung beendet es
+    if (ev.target.closest('[data-faerbung], [data-darstellung]')) modellSetzen(false);
+  };
+  tafel.addEventListener('click', stilVerlassen);
+  tafel.addEventListener('input', stilVerlassen);
+  // Der zuletzt gewählte Stil bleibt markiert, solange die gemerkte Einstellung ihm noch entspricht
+  if (STILE[gemerkt.stil]) {
+    const g = STILE[gemerkt.stil];
+    if (g.faerbung === gemerkt.faerbung && g.edl === gemerkt.edl && g.grund === gemerkt.grund) stilMarkieren(gemerkt.stil);
+  }
+
   const imHintergrund = () => { if (document.visibilityState === 'hidden') einstSpeichern(); };
   document.addEventListener('visibilitychange', imHintergrund);
   bild();

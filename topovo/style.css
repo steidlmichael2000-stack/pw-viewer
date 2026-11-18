@@ -1844,7 +1844,7 @@ input[type="range"] { min-width: 0; }
      klebte die Kopfzeile an der Suche. Zugeklappt bleiben beide stehen. */
   :root { --marke-h: 74px; }
   .marke {
-    position: fixed; z-index: 1; left: 0; top: 0; height: 64px;
+    position: fixed; z-index: 1; left: 0; top: var(--sa-oben); height: 64px;
     display: flex; align-items: center; pointer-events: none;
   }
   /* Ecken wie die Knöpfe (12 px) — das Icon selbst rundet auf 52 px nur mit 11,4 px */
@@ -1864,7 +1864,7 @@ input[type="range"] { min-width: 0; }
   /* Symbolspalte */
   .schiene {
     position: fixed; left: 0; top: 0; bottom: 0; width: var(--schiene);
-    display: flex; flex-direction: column; gap: 4px; padding: var(--marke-h) 6px 10px;
+    display: flex; flex-direction: column; gap: 4px; padding: calc(var(--marke-h) + var(--sa-oben)) 6px calc(10px + var(--sa-unten));
     background: var(--schiene-grund); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
     box-shadow: inset -.5px 0 0 var(--line);
   }
@@ -1965,15 +1965,15 @@ input[type="range"] { min-width: 0; }
   }
   /* Das Regenradar oben mittig (03.11.2026): Es läuft neben den Werkzeugen her
      und kam ihnen unten im Stapel in die Quere */
-  .radar:not([hidden]) { top: 16px; bottom: auto; }
+  .radar:not([hidden]) { top: calc(16px + var(--sa-oben)); bottom: auto; }
   /* Offenes Menü und Anwendungen stören sich hier nicht */
   .menue-offen .bar-ziel, .menue-offen .bar-bottom[data-art="werkzeug"] { display: block; }
   .ui:has(> .sheet:not([hidden])) > .radar:not([hidden]) { display: block; }
 
   /* Knöpfe oben rechts: Standort, Abstecken, Nord */
-  .maploc, .mapziel, .north { top: 16px; right: 16px; bottom: auto; }
-  .mapziel, .mapziel[hidden] ~ .north { top: 68px; }
-  .mapziel:not([hidden]) ~ .north { top: 120px; bottom: auto; }
+  .maploc, .mapziel, .north { top: calc(16px + var(--sa-oben)); right: 16px; bottom: auto; }
+  .mapziel, .mapziel[hidden] ~ .north { top: calc(68px + var(--sa-oben)); }
+  .mapziel:not([hidden]) ~ .north { top: calc(120px + var(--sa-oben)); bottom: auto; }
   /* Messen läuft über die Werkzeugleiste */
   .mapmess, .mess-menue, .maplaser { display: none; }
 
@@ -2308,6 +2308,13 @@ body { font-variant-numeric: tabular-nums; }
 .lz-aufl .lz-str-breite[hidden] { display: none; }
 /* Tafel: Punktgröße fest oben, darunter die Abschnitte zum Aufklappen */
 .lz-tafel .lz-oben { margin: 14px 0 16px; }
+/* Stile ganz oben (Realismus | Höhe | Gelände) */
+.lz-tafel .lz-stil-titel { margin: 14px 0 6px; }
+/* Abgesetzt von Punkte | Gelände darunter (Linie wie zwischen den Abschnitten), Symbol über dem Wort —
+   nebeneinander passte „Realismus“ kaum in ein Drittel der Tafel */
+.lz-tafel .lz-stil { padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.lz-stil .seg-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 4px 8px; font-size: .78rem; line-height: 1.15; }
+.lz-stil [data-ik]::before, .lz-stil .seg-btn::before { width: 19px; height: 19px; margin: 0; }
 /* Punkte | Gelände ganz oben: Abstand zum Rand der Tafel wie seitlich */
 .lz-tafel .lz-darstellung { margin-top: 14px; }
 .lz-tafel .sheet-sec { padding: 10px 0; }
@@ -2464,7 +2471,7 @@ body { font-variant-numeric: tabular-nums; }
   /* Wie Topovo ab 1010 px: Symbolspalte (64 px) und Glasleiste (320 px) links */
   .lz-schiene {
     position: absolute; z-index: 3; left: 0; top: 0; bottom: 0; width: 64px;
-    display: flex; flex-direction: column; gap: 4px; padding: 10px 6px;
+    display: flex; flex-direction: column; gap: 4px; padding: calc(10px + var(--sa-oben)) 6px calc(10px + var(--sa-unten));
     background: var(--schiene-grund); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
     box-shadow: inset -.5px 0 0 var(--line);
   }
@@ -2483,7 +2490,7 @@ body { font-variant-numeric: tabular-nums; }
   .lz-schiene-heim { margin-top: auto; }
   .lz-seite {
     display: block; position: absolute; z-index: 2; left: var(--schiene); top: 0; bottom: 0; width: var(--seite);
-    padding: 14px 16px 20px; overflow: auto;
+    padding: calc(14px + var(--sa-oben)) 16px 20px; overflow: auto;
     background: var(--glass-dicht); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
     box-shadow: inset -.5px 0 0 var(--line), 8px 0 24px rgba(0, 0, 0, .18);
     transition: transform .3s var(--auf), opacity .3s var(--auf);
@@ -2513,13 +2520,13 @@ body { font-variant-numeric: tabular-nums; }
   /* Die runden Knöpfe der Ecken übernimmt die Spalte */
   .lz-einst, .lz-messen, .lz-heim, .lz-zu, .lz-regen-knopf, .lz-regen-tafel, .lz-regen-leiste { display: none; }
   /* Standort wie in Topovo oben rechts, nicht in der Spalte */
-  .lz-ort { top: 68px; right: 16px; bottom: auto; }
-  .lz-box-knopf { top: 16px; right: 16px; bottom: auto; }
-  .lz-box-dialog { top: 16px; right: 68px; bottom: auto; width: 300px; }
+  .lz-ort { top: calc(68px + var(--sa-oben)); right: 16px; bottom: auto; }
+  .lz-box-knopf { top: calc(16px + var(--sa-oben)); right: 16px; bottom: auto; }
+  .lz-box-dialog { top: calc(16px + var(--sa-oben)); right: 68px; bottom: auto; width: 300px; }
   /* Die Quellenzeile endet vor dem offenen Dialog */
   .box-offen .lz-fuss { right: calc(68px + 300px + 12px); }
   /* Fußzeile, Hinweis und Farbskala in der Mitte der freien Fläche */
-  .lz-fuss { left: calc(var(--schiene) + var(--seite) + 16px); right: 74px; top: 16px; }
+  .lz-fuss { left: calc(var(--schiene) + var(--seite) + 16px); right: 74px; top: calc(16px + var(--sa-oben)); }
   .lz-tipp { left: calc(50% + (var(--schiene) + var(--seite)) / 2); max-width: calc(100% - var(--schiene) - var(--seite) - 56px); }
   .lz-skala { left: calc(50% + (var(--schiene) + var(--seite)) / 2); }
   .seite-zu .lz-fuss { left: calc(64px + 16px); }
@@ -2561,6 +2568,7 @@ body { font-variant-numeric: tabular-nums; }
 [data-ik="rahmen"] { --ik: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='1.5'/%3E%3Ccircle cx='12' cy='12' r='1.8' fill='black'/%3E%3C/svg%3E"); }
 [data-ik="rechteck"] { --ik: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='6' width='17' height='12' rx='1' stroke-dasharray='3.2 2.4'/%3E%3C/svg%3E"); }
 [data-ik="polygon"] { --ik: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 19 3 9.5 11.5 4 20.5 9 18 18.5z'/%3E%3Ccircle cx='5' cy='19' r='1.7' fill='black'/%3E%3Ccircle cx='11.5' cy='4' r='1.7' fill='black'/%3E%3Ccircle cx='20.5' cy='9' r='1.7' fill='black'/%3E%3C/svg%3E"); }
+[data-ik="kreis"] { --ik: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M12 12h8.5'/%3E%3Ccircle cx='12' cy='12' r='1.7' fill='black'/%3E%3C/svg%3E"); }
 [data-ik="kacheln"] { --ik: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='1.5'/%3E%3Cpath d='M12 4v16M4 12h16'/%3E%3C/svg%3E"); }
 [data-ik="wuerfel"] { --ik: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 20 7.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9'/%3E%3C/svg%3E"); }
 [data-ik="laden"] { --ik: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4v11M7.5 10.5 12 15l4.5-4.5'/%3E%3Cpath d='M5 16v3.5h14V16'/%3E%3C/svg%3E"); }
@@ -2606,7 +2614,7 @@ body { font-variant-numeric: tabular-nums; }
 .seg-zwei .seg-btn { min-width: 0; }
 /* Allein in der letzten Reihe (Gipfel unter Straßen/Ortsnamen): über beide Spalten */
 .seg-zwei > .seg-btn:last-child:nth-child(odd) { grid-column: 1 / -1; }
-/* Vier schmale Knöpfe (Laser: Rahmen, Rechteck, Polygon, Kacheln): Symbol über dem Wort wie in der Spalte */
+/* Fünf schmale Knöpfe (Laser: Rahmen, Rechteck, Polygon, Kreis, Kacheln): Symbol über dem Wort wie in der Spalte */
 .seg-ik-oben .seg-btn[data-ik] {
   display: flex; flex-direction: column; align-items: center; gap: 3px;
   padding-top: 7px; padding-bottom: 6px; font-size: .78rem;
