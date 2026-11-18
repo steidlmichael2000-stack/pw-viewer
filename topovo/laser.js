@@ -1716,14 +1716,32 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       const h = d.xyz[3 * i + 2] - g, c = zellAus(y, Z, b) * b + zellAus(x, Z, b);
       if (!haus[c] && h > chm[c]) chm[c] = h;
     }
-    // Glätten (3 × 3, Mitte vierfach), damit eine Krone nicht in viele Spitzen zerfällt
-    const gl = new Float32Array(b * b);
-    for (let y = 1; y < b - 1; y++) for (let x = 1; x < b - 1; x++) {
-      const c = y * b + x;
-      if (!chm[c]) continue;
-      gl[c] = (4 * chm[c] + 2 * (chm[c - 1] + chm[c + 1] + chm[c - b] + chm[c + b])
-        + chm[c - b - 1] + chm[c - b + 1] + chm[c + b - 1] + chm[c + b + 1]) / 16;
+    /* Durchdringung (18.11.2026, Abgleich mit den Einzelbäumen des LDBV): Anteil der Bewuchspunkte je Zelle,
+     * die mehr als 1,5 m unter dem Zellmaximum liegen. In einer Krone dringt der Laser ein, auf einer
+     * Brückenrampe oder einem Dach nicht (dort 0–0,1, bei Bäumen fast immer über 0,3). */
+    const alle = new Uint32Array(b * b), tief = new Uint32Array(b * b);
+    for (let i = 0; i < n; i++) {
+      if (!BAUM_KLASSEN.has(d.klasse[i])) continue;
+      const x = d.xyz[3 * i], y = d.xyz[3 * i + 1], g = bodenAn(x, y);
+      if (g !== g) continue;
+      const c = zellAus(y, Z, b) * b + zellAus(x, Z, b);
+      if (haus[c]) continue;
+      alle[c]++;
+      if (d.xyz[3 * i + 2] - g < chm[c] - 1.5) tief[c]++;
     }
+    /* Glätten (3 × 3, Mitte vierfach), zweimal, damit eine Krone nicht in viele Spitzen zerfällt —
+     * einmal ließ gegen die LDBV-Bäume noch viele Kronen doppelt (Neustadt/Aisch 312 → 145 doppelt) */
+    const glaetten = q => {
+      const z = new Float32Array(b * b);
+      for (let y = 1; y < b - 1; y++) for (let x = 1; x < b - 1; x++) {
+        const c = y * b + x;
+        if (!chm[c]) continue;
+        z[c] = (4 * q[c] + 2 * (q[c - 1] + q[c + 1] + q[c - b] + q[c + b])
+          + q[c - b - 1] + q[c - b + 1] + q[c + b - 1] + q[c + b + 1]) / 16;
+      }
+      return z;
+    };
+    const gl = glaetten(glaetten(chm));
     const liste = [];
     const RICHTUNG = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
     for (let y = 2; y < b - 2; y++) for (let x = 2; x < b - 2; x++) {
@@ -1742,6 +1760,10 @@ export function laserAnsicht(d, info, { beimSchliessen } = {}) {
       }
       // Leitungen, Masten, einzelne Ausreißer: um die Spitze zu wenig Bewuchs
       if (!spitze || voll < alle * 0.45) continue;
+      // Kaum Punkte unter der Oberfläche (3 × 3 um die Spitze): Brücke, Dach, Mauer — kein Baum
+      let pa = 0, pt = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { pa += alle[c + dy * b + dx]; pt += tief[c + dy * b + dx]; }
+      if (pt < pa * 0.15) continue;
       let summe = 0;
       for (const [rx, ry] of RICHTUNG) {
         const schritt = Math.hypot(rx, ry) * Z;
